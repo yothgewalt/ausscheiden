@@ -1,0 +1,17 @@
+node_modules/
+build/
+dist/
+.next/
+next-env.d.ts
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+
+.playwright-mcp
+
+.claude

@@ -1,0 +1,6 @@
+{
+  "name": "ระบบจองโต๊ะจีนงานเกษียณ",
+  "description": "ระบบจองโต๊ะจีนงานเลี้ยงเกษียณ เลือกผังโต๊ะกราฟิก ล็อกที่นั่งชั่วคราว ชำระเงิน PromptPay ตรวจสลิปอัตโนมัติ ออก e-Ticket และระบบแอดมิน",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

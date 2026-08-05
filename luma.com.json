@@ -1,0 +1,67 @@
+{
+  "source": "https://luma.com/cursor-bkk-090826",
+  "tokens": {
+    "spacing": {
+      "scale": [4, 8, 16, 18, 24],
+      "base_unit": 4
+    },
+    "typography": {
+      "families": ["Google Sans Flex", "-apple-system"],
+      "scale": [
+        { "role": "h1", "size": "48px", "weight": "575", "family": "Google Sans Flex" },
+        { "role": "body", "size": "16px", "weight": "400", "family": "-apple-system" },
+        { "role": "ui", "size": "14px", "weight": "500", "family": "-apple-system" },
+        { "role": "meta", "size": "13px", "weight": "400", "family": "-apple-system" },
+        { "role": "caption", "size": "12px", "weight": "400", "family": "-apple-system" }
+      ]
+    },
+    "colors": [
+      { "role": "background", "value": "#F2F2F2" },
+      { "role": "surface", "value": "#FFFFFF" },
+      { "role": "text-primary", "value": "#141414" },
+      { "role": "text-muted", "value": "rgba(20,20,20,0.64)" },
+      { "role": "text-subtle", "value": "rgba(20,20,20,0.36)" },
+      { "role": "accent", "value": "#D69712" }
+    ],
+    "radius": ["4px", "8px", "24px", "100px", "1000px"],
+    "shadows": [
+      "rgba(20,20,20,0.08) 0 0 0 0.5px inset",
+      "rgba(0,0,0,0.1) 0 1px 4px"
+    ],
+    "image_ratios": [
+      { "usage": "cover", "ratio": "1:1" },
+      { "usage": "registration-card", "ratio": "1.92:1" }
+    ],
+    "grid": { "max_width": "1600px", "columns": 2, "gutter": "flexbox" }
+  },
+  "taste": [
+    {
+      "name": "Depth by Contrast, Not by Weight",
+      "trigger": "Separating event metadata, a registration widget, and long bilingual body copy on one screen",
+      "decision": "Flat grey field + 0.5px inset hairlines over drop-shadowed elevated cards",
+      "reason": "A near-invisible edge marks a distinct thing without making the eye process a glow around every block, so the one true shadow can mean 'this is the important widget'",
+      "evidence": ["#F2F2F2 covers 92.9% of surface", "dominant shadow rgba(20,20,20,0.08) 0 0 0 0.5px inset (9 uses)", "exactly one drop shadow 0 1px 4px, on the registration card"]
+    },
+    {
+      "name": "Color Is Information, Not Identity",
+      "trigger": "Deciding how much brand amber to spend across CTA, links, badges, icons",
+      "decision": "Amber only on the 'Require Approval' concept; primary CTA painted neutral #141414",
+      "reason": "If everything interactive is colored, color stops meaning anything — reserving amber for one gate makes a glance down the ticket list tell you which options will make you wait",
+      "evidence": ["amber #D69712 appears 3x at <1% surface area", "amber only on approval badges", "'Request to Join' button is #141414, not amber"]
+    },
+    {
+      "name": "One Web Font, Spent at the Top",
+      "trigger": "Deciding how many typefaces to load for a page that is 95% dense bilingual informational text",
+      "decision": "Load Google Sans Flex for the h1 alone; render everything else in the native -apple-system stack",
+      "reason": "A visitor deciding whether to RSVP wants instant paint and text that reads like their own OS — one branded headline buys identity, and web-font body text would only slow first paint",
+      "evidence": ["Google Sans Flex = 8 uses, h1 only (48px/575)", "-apple-system = 271 uses across body/UI/Thai", "body max-width: none"]
+    },
+    {
+      "name": "Trusted Whitespace Over the Card Reflex",
+      "trigger": "Laying out a long description with sub-sections where the easy move is to box each in a card",
+      "decision": "Flat left-aligned text separated by whitespace and hairline rules; cards reserved for actionable content only",
+      "reason": "Cards signal 'act on me' — using them for read-only prose cries wolf, so the one card that matters (registration) loses its pull. Whitespace groups text just as well",
+      "evidence": ["gridCount: 0, sectionGaps: []", "only 2 card components exist (cover + registration), both actionable", "18px paragraph rhythm with hairline rules under section heads"]
+    }
+  ]
+}

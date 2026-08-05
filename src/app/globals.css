@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@theme {
+  /* luma: one web font for display only; native stack everywhere else.
+     --font-line-seed is injected by next/font/local (see src/app/fonts.ts) */
+  --font-display: var(--font-line-seed), 'LINE Seed Sans', sans-serif;
+  --font-sans: var(--font-line-seed), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-page: #F2F2F2;
+  --color-surface: #FFFFFF;
+  --color-primary: #141414;
+  --color-muted: rgba(20, 20, 20, 0.64);
+  --color-subtle: rgba(20, 20, 20, 0.36);
+  --color-accent: #D69712;
+  --color-hairline: rgba(20, 20, 20, 0.08);
+}
+
+:root {
+  color: #141414;
+  background-color: #F2F2F2;
+}
+
+html, body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #F2F2F2;
+  color: #141414;
+}
+
+/* luma: 0.5px inset hairline is the default separator (replaces colored/1px borders) */
+.hairline {
+  box-shadow: rgba(20, 20, 20, 0.08) 0 0 0 0.5px inset;
+}
+
+.hairline-b {
+  border-bottom: 0.5px solid rgba(20, 20, 20, 0.08);
+}
+
+/* luma: secondary/outline buttons need a readable edge — the 8% separator hairline
+   is too faint for an actionable control. 1px inset at 18% = visible, no layout shift. */
+.btn-secondary {
+  box-shadow: rgba(20, 20, 20, 0.18) 0 0 0 1px inset;
+}
+.btn-secondary:hover {
+  box-shadow: rgba(20, 20, 20, 0.28) 0 0 0 1px inset;
+}
+
+/* luma: the ONE drop shadow — reserved for the single most-actionable card */
+.card-shadow {
+  box-shadow: rgba(0, 0, 0, 0.1) 0 1px 4px;
+}
+
+.content-column {
+  max-width: 960px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.animate-shake {
+  animation: shake 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-shake {
+    animation: none;
+  }
+}
