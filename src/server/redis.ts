@@ -109,6 +109,47 @@ export async function claimTransRef(transRef: string): Promise<boolean> {
   return ok === 'OK';
 }
 
+/**
+ * Payment token — server-minted proof that a slip was verified for a specific
+ * (key, sessionId, amount). confirmBooking consumes it so the client can't book
+ * something it never paid the right amount for. `key` is the tableId for a table
+ * booking, or `individual:<sessionId>` for a table-less individual ticket.
+ * ponytail: 10-min TTL matches the payment lock; a stale token just expires.
+ */
+export interface PaymentToken {
+  transRef: string;
+  key: string;
+  sessionId: string;
+  amount: number;
+}
+const PAYTOKEN_TTL_SEC = LOCK_TTL_SEC;
+const payKey = (key: string) => `slip:paytoken:${key}`;
+
+export async function mintPaymentToken(tok: PaymentToken): Promise<void> {
+  await pub.set(payKey(tok.key), JSON.stringify(tok), 'EX', PAYTOKEN_TTL_SEC);
+}
+
+/**
+ * Read the token for `key`, delete it, and return it — but only if it belongs
+ * to `sessionId` (otherwise null, token left for the rightful owner).
+ * ponytail: GET+guard+DEL, not a single atomic op, so two confirms from the
+ * SAME session could both read before either deletes. That's harmless: the
+ * caller's `update(tables) WHERE status='available'` + `onConflictDoNothing(ref)`
+ * make the booking itself single-shot. Move to a Lua GETDEL-with-guard only if a
+ * cross-session replay ever matters here.
+ */
+export async function consumePaymentToken(
+  key: string,
+  sessionId: string
+): Promise<PaymentToken | null> {
+  const raw = await pub.get(payKey(key));
+  if (!raw) return null;
+  const tok = JSON.parse(raw) as PaymentToken;
+  if (tok.sessionId !== sessionId) return null;
+  await pub.del(payKey(key));
+  return tok;
+}
+
 // One 'message' listener for the whole process, fanning out to a Set of
 // callbacks. Registering a listener per subscriber leaked them onto the shared
 // `sub` connection and tripped MaxListenersExceededWarning past 10 clients.
@@ -157,7 +198,7 @@ async function _demo() {
   console.assert(gone === null, 'released lock is gone');
 
   // payment-token mint/consume: single-use, bound to the verified slip.
-  const tok = { transRef: 'TR-demo', tableId: t, sessionId: 'sessionA', amount: 5999 };
+  const tok = { transRef: 'TR-demo', key: t, sessionId: 'sessionA', amount: 5999 };
   await mintPaymentToken(tok);
   const wrongSession = await consumePaymentToken(t, 'sessionB');
   console.assert(wrongSession === null, 'other session cannot consume token');

@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { TRPCError } from '@trpc/server';
 import { router, publicProcedure } from '../trpc';
 import { tables, bookings } from '../../db/schema';
 import { INDIVIDUAL_CAPACITY } from '../../../data/mockData';
@@ -10,6 +11,9 @@ const tableIdInput = z.object({ tableId: z.string().regex(/^T\d{2}$/) });
 
 // Full purchase payload persisted on confirm. tableId optional — individual tickets
 // carry no table. ref is the client "BK-2026-xxxx" code (unique → idempotent re-confirm).
+// NOTE: no finalAmount here — the amount is taken from the server-minted payment
+// token (see slips.verify), never from the client, so a caller can't book at a
+// price it didn't actually pay.
 const confirmInput = z.object({
   ref: z.string().min(1),
   tableId: z.string().regex(/^T\d{2}$/).optional(),
@@ -18,7 +22,6 @@ const confirmInput = z.object({
   email: z.string().min(1),
   lineId: z.string().optional(),
   bookingType: z.enum(['whole_table', 'individual_seats', 'individual']),
-  finalAmount: z.number().int().positive(),
 });
 
 /** Effective per-table state seen by clients. */
@@ -92,21 +95,49 @@ export const tablesRouter = router({
   }),
 
   confirmBooking: publicProcedure.input(confirmInput).mutation(async ({ ctx, input }) => {
-    // Ledger invariant: individual tickets cap at 16. Count existing individuals and
-    // reject the 17th — but only for a NEW ref, so an idempotent re-confirm of an
-    // already-counted booking still succeeds.
-    if (input.bookingType === 'individual') {
-      const already = await ctx.db.select().from(bookings).where(eq(bookings.ref, input.ref));
-      if (already.length === 0) {
-        const count = (
-          await ctx.db.select().from(bookings).where(eq(bookings.bookingType, 'individual'))
-        ).length;
-        if (count >= INDIVIDUAL_CAPACITY) return { ok: false as const, reason: 'sold_out' as const };
+    // AUTHORIZATION: a booking is only allowed against a payment token that
+    // slips.verify minted for THIS session, for THIS table (or this session's
+    // individual ticket). No token ⇒ the caller never proved a correct payment,
+    // so reject. The token also carries the server-derived amount — we persist
+    // THAT, never a client-supplied price.
+    const tokenKey = input.tableId ?? `individual:${ctx.sessionId}`;
+
+    // Idempotent re-confirm: if this ref already booked, the token is long gone.
+    // Return the existing row instead of demanding a fresh (already-consumed) token.
+    const already = await ctx.db.select().from(bookings).where(eq(bookings.ref, input.ref));
+    if (already.length > 0) {
+      return { ok: true as const, id: already[0].id };
+    }
+
+    const token = await locks.consumePaymentToken(tokenKey, ctx.sessionId);
+    if (!token) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'ยังไม่ได้ยืนยันการชำระเงิน หรือเซสชันไม่ตรงกัน กรุณาชำระเงินและอัปโหลดสลิปก่อน',
+      });
+    }
+
+    // For a table booking, the caller must also currently OWN the lock in the
+    // pending_payment phase — the token alone isn't enough if someone else now
+    // holds the table.
+    if (input.tableId) {
+      const lock = await locks.readLock(input.tableId);
+      if (!lock || lock.sessionId !== ctx.sessionId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'สิทธิ์การจองโต๊ะนี้หมดอายุแล้ว กรุณาเริ่มใหม่' });
       }
     }
 
-    // Persist the purchase. onConflictDoNothing(ref): a re-confirm of the same slip
-    // is a no-op, never a duplicate row. Returns the row so the client gets the UUID.
+    // Ledger invariant: individual tickets cap at 16. Count existing individuals
+    // and reject the 17th. (ref-already-booked was handled above.)
+    if (input.bookingType === 'individual') {
+      const count = (
+        await ctx.db.select().from(bookings).where(eq(bookings.bookingType, 'individual'))
+      ).length;
+      if (count >= INDIVIDUAL_CAPACITY) return { ok: false as const, reason: 'sold_out' as const };
+    }
+
+    // Persist the purchase with the server-derived amount from the token.
+    // onConflictDoNothing(ref): a racing duplicate is a no-op, never a second row.
     const [row] = await ctx.db
       .insert(bookings)
       .values({
@@ -117,15 +148,19 @@ export const tablesRouter = router({
         email: input.email,
         lineId: input.lineId,
         bookingType: input.bookingType,
-        finalAmount: input.finalAmount,
+        finalAmount: token.amount,
       })
       .onConflictDoNothing({ target: bookings.ref })
       .returning({ id: bookings.id });
 
-    // Table-bound booking: mark it booked and drop the Redis lock. Individual
-    // tickets have no table, so skip both.
+    // Table-bound booking: mark it booked and drop the Redis lock. Scope the
+    // update to an available row so we never flip a table someone else already
+    // booked. Individual tickets have no table, so skip both.
     if (input.tableId) {
-      await ctx.db.update(tables).set({ status: 'booked' }).where(eq(tables.id, input.tableId));
+      await ctx.db
+        .update(tables)
+        .set({ status: 'booked' })
+        .where(and(eq(tables.id, input.tableId), eq(tables.status, 'available')));
       await locks.release(input.tableId, ctx.sessionId);
     }
 

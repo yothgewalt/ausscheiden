@@ -445,7 +445,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const res = await verifySlip.mutateAsync({
       slipImage,
-      expectedAmount: booking.finalAmount,
+      tableId: booking.tableId && TABLE_ID_RE.test(booking.tableId) ? booking.tableId : undefined,
+      bookingType: booking.bookingType,
     });
 
     const isSuccess = res.success;
@@ -488,7 +489,6 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         email: booking.email,
         lineId: booking.lineId,
         bookingType: booking.bookingType,
-        finalAmount: booking.finalAmount,
       });
 
       if (!confirmResult.ok) {
