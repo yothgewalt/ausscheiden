@@ -16,16 +16,28 @@ function crc16(payload: string): string {
   return crc.toString(16).toUpperCase().padStart(4, '0');
 }
 
-// phone: any format (dashes/spaces ok). amount in THB. Returns the raw QR string,
-// or '' if no usable number — callers skip rendering rather than crash.
-export function promptPayPayload(phone: string | undefined | null, amount: number): string {
-  const digits = (phone ?? '').replace(/\D/g, '');
+// id: any format (dashes/spaces ok). amount in THB. Returns the raw QR string,
+// or '' if no usable proxy — callers skip rendering rather than crash.
+// Proxy type is inferred from digit count (BOT/EMVCo tag 29 sub-tags):
+//   15 → e-Wallet ID (sub-tag 03)  •  13 → national/tax ID (02)  •  else → mobile (01).
+export function promptPayPayload(id: string | undefined | null, amount: number): string {
+  const digits = (id ?? '').replace(/\D/g, '');
   if (digits.length < 9) return ''; // ponytail: no valid proxy → no QR, don't throw
-  // Mobile proxy = "0066" + 9-digit number (leading 0 dropped).
-  const proxy = '0066' + digits.replace(/^0/, '');
+
+  let proxyTag: string, proxyVal: string;
+  if (digits.length === 15) {
+    proxyTag = '03'; // e-Wallet ID — value used verbatim
+    proxyVal = digits;
+  } else if (digits.length === 13) {
+    proxyTag = '02'; // national/tax ID — value used verbatim
+    proxyVal = digits;
+  } else {
+    proxyTag = '01'; // mobile — "0066" + number, leading 0 dropped
+    proxyVal = '0066' + digits.replace(/^0/, '');
+  }
 
   const merchant =
-    tlv('00', 'A000000677010111') + tlv('01', proxy); // AID + mobile
+    tlv('00', 'A000000677010111') + tlv(proxyTag, proxyVal); // AID + proxy
 
   const body =
     tlv('00', '01') + // payload format indicator
@@ -50,5 +62,11 @@ export function _demo() {
     'PromptPay payload structure drift'
   );
   console.assert(crc16('123456789') === '29B1', 'CRC16/CCITT-FALSE broken');
+  // e-Wallet ID (15 digits) → tag 03 with value verbatim, no "0066" prefix.
+  const w = promptPayPayload('004-64900071-0988', 4);
+  console.assert(
+    w.includes('0315004649000710988') && !w.includes('0066'),
+    'e-Wallet proxy (tag 03) drift'
+  );
   return p;
 }

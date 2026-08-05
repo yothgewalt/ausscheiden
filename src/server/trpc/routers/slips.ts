@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { router, publicProcedure } from '../trpc';
-import { verifySlipImage, receiverMatches, EXPECTED_RECEIVING_BANK } from '../../rdcw';
+import { verifySlipImage, receiverMatches, proxyMatches, EXPECTED_RECEIVING_BANK } from '../../rdcw';
 import { claimTransRef, mintPaymentToken } from '../../redis';
 import { tables } from '../../db/schema';
 import { INDIVIDUAL_PRICE } from '../../../data/mockData';
@@ -71,6 +71,16 @@ export const slipsRouter = router({
         return {
           success: false as const,
           failureReason: 'ธนาคารผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี',
+        };
+      }
+
+      // PromptPay proxy check — only rejects on a definite mismatch. Absent or fully
+      // masked proxy (direct bank transfer) returns null and falls through to the
+      // name+bank gates above, so legacy slips still verify.
+      if (proxyMatches(data.receiver?.proxy?.value) === false) {
+        return {
+          success: false as const,
+          failureReason: 'พร้อมเพย์ผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี',
         };
       }
 

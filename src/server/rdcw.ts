@@ -12,6 +12,22 @@ export const EXPECTED_RECEIVER = 'ณัฏฐา สงวนศักดิ์
 // the bank behind the PromptPay account. The slip must credit this bank.
 export const EXPECTED_RECEIVING_BANK = '004';
 
+// Last 4 of the PromptPay e-Wallet ID (004-64900071-0988). RDCW masks the proxy
+// value to "XXXXXXXXXXX0988"; we match on the visible tail.
+export const EXPECTED_RECEIVER_PROXY_LAST4 = '0988';
+
+/**
+ * Proxy-value match. The API masks the receiver proxy to its last 4 digits
+ * (e.g. "XXXXXXXXXXX0988"). Absent proxy (direct bank transfer) ⇒ null = "can't
+ * check", caller decides. Present ⇒ its last 4 digits must equal the expected.
+ */
+export function proxyMatches(proxyValue: string | null | undefined): boolean | null {
+  if (!proxyValue) return null;
+  const last4 = proxyValue.replace(/\D/g, '').slice(-4);
+  if (last4.length < 4) return null; // fully masked / no digits → can't check
+  return last4 === EXPECTED_RECEIVER_PROXY_LAST4;
+}
+
 // Honorifics to drop before comparing (dots removed, upper-cased).
 const HONORIFICS = new Set([
   'นาย', 'นาง', 'นางสาว', 'นส', 'ดช', 'ดญ', 'ดร',
@@ -49,7 +65,11 @@ export interface RdcwSlipData {
   receivingBank?: string; // bank code crediting the money, e.g. "004" = KBANK
   sendingBank?: string;
   sender?: { name?: string; displayName?: string };
-  receiver: { name?: string; displayName?: string };
+  receiver: {
+    name?: string;
+    displayName?: string;
+    proxy?: { type?: string | null; value?: string | null };
+  };
 }
 
 // Slip-verify quota for the account — sibling of `data` in the response envelope.
@@ -133,5 +153,9 @@ if ((import.meta as { main?: boolean }).main) {
   ok(receiverMatches('นาย สมชาย ใจดี') === false, 'wrong payee rejected');
   ok(receiverMatches('') === false, 'empty rejected');
   ok(receiverMatches(null) === false, 'null rejected');
+  ok(proxyMatches('XXXXXXXXXXX0988') === true, 'masked proxy tail matches');
+  ok(proxyMatches('XXXXXXXXXXX1234') === false, 'wrong proxy tail rejected');
+  ok(proxyMatches(null) === null, 'absent proxy → null (uncheckable)');
+  ok(proxyMatches('XXXXXXXXXXX') === null, 'fully-masked proxy → null');
   console.log('all rdcw self-checks passed');
 }

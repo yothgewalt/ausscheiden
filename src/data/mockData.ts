@@ -13,7 +13,7 @@ export const initialEventDetails: EventDetails = {
   venueEn: 'Puang Saed Room, Faculty of Industrial Technology and Management',
   organizerTh: 'ภาควิชาเทคโนโลยีสารสนเทศ คณะเทคโนโลยีสารสนเทศ และการจัดการเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าพระนครเหนือ วิทยาเขตปราจีนบุรี',
   organizerEn: 'Department of Information Technology, Faculty of Information Technology and Industrial Technology Management, King Mongkut\'s University of Technology North Bangkok (Prachinburi Campus)',
-  promptpayNumber: '137-3-88189-5',
+  promptpayNumber: '004-64900071-0988', // PromptPay e-Wallet ID → QR source
   promptpayMobile: '064-182-3735',
   promptpayAccountName: 'ณัฏฐา สงวนศักดิ์',
   bankName: 'ธนาคารกสิกรไทย (K Bank)',

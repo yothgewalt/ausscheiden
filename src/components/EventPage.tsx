@@ -1,7 +1,7 @@
 import React from 'react';
 import { useBooking } from '../context/BookingContext';
 import { INDIVIDUAL_PRICE, INDIVIDUAL_CAPACITY } from '../data/mockData';
-import { MapPin, Users, ArrowRight, ShieldCheck, Shirt, Wine, AlertTriangle, ChevronRight, Check } from 'lucide-react';
+import { MapPin, ArrowRight, Shirt, Wine, AlertTriangle, ChevronRight, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface EventPageProps {
@@ -108,21 +108,21 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
           className="w-full lg:w-[300px] lg:shrink-0 lg:sticky lg:top-8 self-start space-y-5"
         >
           {/* Cover poster — 1:1, rounded-3xl, NO shadow. Photo + dark overlay for legible text. */}
-          <div className="relative aspect-square rounded-lg overflow-hidden text-white">
+          <div className="relative aspect-[3/2] sm:aspect-[16/9] lg:aspect-square rounded-lg overflow-hidden text-white">
             <img
               src="/images/front.jpg"
               alt="30 ปี ไอที: รีคอนเน็กต์"
               className="absolute inset-0 w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10" />
-            <div className="relative h-full flex flex-col items-center justify-center text-center p-8">
+            <div className="relative h-full flex flex-col items-center justify-center text-center p-6 sm:p-8">
               <div className="font-display text-2xl sm:text-3xl font-[575] tracking-tight leading-tight drop-shadow-md">
                 รีคอนเน็กต์
               </div>
-              <div className="text-base text-white/80 drop-shadow">
+              <div className="text-sm sm:text-base text-white/80 drop-shadow">
                 ไอทีฉลองครบรอบ 30 ปี
               </div>
-              <div className="mt-3 text-sm text-white/70 drop-shadow">{eventDetails.dateTh}</div>
+              <div className="mt-2 sm:mt-3 text-xs sm:text-sm text-white/70 drop-shadow">{eventDetails.dateTh}</div>
             </div>
           </div>
 

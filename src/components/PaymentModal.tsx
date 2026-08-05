@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { useBooking } from '../context/BookingContext';
+import { promptPayPayload } from '../utils/promptpay';
 import {
   X,
   Upload,
@@ -150,7 +151,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         {/* Modal Body */}
         <div className="p-5 space-y-4 overflow-y-auto">
 
-          {/* Amount — the first thing to read */}
+            {/* Amount — the first thing to read */}
           <div className="flex items-baseline justify-between">
             <span className="text-xs sm:text-sm font-semibold text-muted">
               ยอดที่ต้องชำระ
@@ -160,35 +161,29 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </span>
           </div>
 
-          {/* Bank transfer details — name, number, bank. Copy the account number only. */}
-          <div className="p-4 bg-page rounded-lg border border-[rgba(20,20,20,0.16)] space-y-3">
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-muted">
-              <Landmark className="w-4 h-4" />
-              <span>โอนเงินเข้าบัญชีธนาคาร</span>
-            </div>
-            <dl className="space-y-2 text-sm">
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-muted shrink-0">ธนาคาร</dt>
-                <dd className="font-semibold text-primary text-right">{eventDetails.bankName}</dd>
+          {/* PromptPay QR — dynamic (amount embedded). Payload built client-side from the
+              e-Wallet ID; rendered via api.qrserver.com (same service as booking QR, no dep).
+              Empty payload ⇒ skip the block rather than show a broken image. */}
+          {(() => {
+            const payload = promptPayPayload(
+              eventDetails.promptpayNumber,
+              activeLockBooking.finalAmount
+            );
+            if (!payload) return null;
+            return (
+              <div className="flex flex-col items-center gap-2 p-4 bg-page rounded-lg border border-[rgba(20,20,20,0.16)]">
+                <span className="text-xs font-semibold text-muted">สแกนเพื่อชำระผ่านพร้อมเพย์</span>
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data=${encodeURIComponent(payload)}`}
+                  alt="PromptPay QR"
+                  width={220}
+                  height={220}
+                  className="rounded-lg bg-surface p-2 border border-[rgba(20,20,20,0.08)]"
+                />
+                <span className="text-[14px] text-subtle">{eventDetails.promptpayAccountName}</span>
               </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-muted shrink-0">ชื่อบัญชี</dt>
-                <dd className="font-semibold text-primary text-right">{eventDetails.promptpayAccountName}</dd>
-              </div>
-              <div className="flex items-baseline justify-between gap-3">
-                <dt className="text-muted shrink-0">เลขที่บัญชี</dt>
-                <dd className="font-mono font-bold text-primary text-right">{eventDetails.bankAccountNumber}</dd>
-              </div>
-            </dl>
-            <button
-              type="button"
-              onClick={handleCopyAccount}
-              className="w-full px-3 py-1.5 rounded-lg bg-surface btn-secondary text-xs font-bold text-muted flex items-center justify-center gap-1.5 hover:bg-[#141414]/[0.03] transition-all cursor-pointer"
-            >
-              <span>{copiedAccount ? 'คัดลอกเลขบัญชีแล้ว' : 'คัดลอกเลขที่บัญชี'}</span>
-              {copiedAccount ? <Check className="w-3.5 h-3.5 text-accent" /> : <Copy className="w-3.5 h-3.5" />}
-            </button>
-          </div>
+            );
+          })()}
 
           {/* Slip Upload — input is sr-only (NOT display:none, or ref.click() no-ops on
               macOS) and triggered by ref. Empty state: whole zone opens the picker. Uploaded
