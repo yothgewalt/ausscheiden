@@ -41,7 +41,7 @@ async function publish(evt: LockEvent) {
   await pub.publish(CHANNEL, JSON.stringify(evt));
 }
 
-async function read(id: string): Promise<Lock | null> {
+export async function readLock(id: string): Promise<Lock | null> {
   const raw = await pub.get(keyOf(id));
   return raw ? (JSON.parse(raw) as Lock) : null;
 }
@@ -59,7 +59,7 @@ export async function acquire(id: string, sessionId: string): Promise<Lock | nul
     return lock;
   }
   // Already locked — allow the owner to refresh, reject everyone else.
-  const existing = await read(id);
+  const existing = await readLock(id);
   if (existing && existing.sessionId === sessionId) {
     await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC);
     await publish({ id, phase: 'selecting', sessionId });
@@ -70,7 +70,7 @@ export async function acquire(id: string, sessionId: string): Promise<Lock | nul
 
 /** Move an owned lock to 'pending_payment' and reset the TTL. Null if not owner. */
 export async function promote(id: string, sessionId: string): Promise<Lock | null> {
-  const existing = await read(id);
+  const existing = await readLock(id);
   if (!existing || existing.sessionId !== sessionId) return null;
   const lock = makeLock(id, 'pending_payment', sessionId);
   await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC);
@@ -80,7 +80,7 @@ export async function promote(id: string, sessionId: string): Promise<Lock | nul
 
 /** Release an owned lock. No-op (returns false) if not owner or already gone. */
 export async function release(id: string, sessionId: string): Promise<boolean> {
-  const existing = await read(id);
+  const existing = await readLock(id);
   if (!existing || existing.sessionId !== sessionId) return false;
   await pub.del(keyOf(id));
   await publish({ id, phase: null, sessionId });
@@ -153,8 +153,19 @@ async function _demo() {
   console.assert(relB === false, 'non-owner cannot release');
   const relA = await release(t, 'sessionA');
   console.assert(relA === true, 'owner releases');
-  const gone = await read(t);
+  const gone = await readLock(t);
   console.assert(gone === null, 'released lock is gone');
+
+  // payment-token mint/consume: single-use, bound to the verified slip.
+  const tok = { transRef: 'TR-demo', tableId: t, sessionId: 'sessionA', amount: 5999 };
+  await mintPaymentToken(tok);
+  const wrongSession = await consumePaymentToken(t, 'sessionB');
+  console.assert(wrongSession === null, 'other session cannot consume token');
+  const consumed = await consumePaymentToken(t, 'sessionA');
+  console.assert(consumed?.transRef === 'TR-demo' && consumed?.amount === 5999, 'owner consumes token');
+  const again = await consumePaymentToken(t, 'sessionA');
+  console.assert(again === null, 'token is single-use');
+
   console.log('redis lock self-check passed');
   process.exit(0);
 }

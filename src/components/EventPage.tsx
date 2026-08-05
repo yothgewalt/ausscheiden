@@ -250,6 +250,16 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                               จำกัด {INDIVIDUAL_CAPACITY} ที่นั่ง · เหลือ {zoneAvailability.individual?.available ?? INDIVIDUAL_CAPACITY}
                             </span>
                           )}
+                          {z.id === 'alumni' && (
+                            <span className="text-xs text-muted">
+                              อาหาร + เครื่องดื่ม + ของที่ระลึก · เหลือ {zoneAvailability.alumni?.available ?? 0} โต๊ะ
+                            </span>
+                          )}
+                          {z.id === 'student' && (
+                            <span className="text-xs text-muted">
+                                อาหาร + เครื่องดื่ม (ไม่มีของที่ระลึก) · เหลือ {zoneAvailability.student?.available ?? 0} โต๊ะ
+                            </span>
+                          )}
                         </span>
                         {/* availability badge — green "ยังมีที่ว่าง" / red "เต็ม" when the zone is full */}
                         {full ? (
