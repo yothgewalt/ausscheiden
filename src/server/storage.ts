@@ -1,14 +1,21 @@
 // MinIO / S3 slip archive. Uses Bun's native S3Client (no extra dep) — works
 // against MinIO by pointing endpoint at it. One singleton, mirroring redis.ts.
 
-import { S3Client } from 'bun';
-
-const s3 = new S3Client({
-  endpoint: process.env.S3_ENDPOINT || 'http://localhost:9000',
-  bucket: process.env.S3_BUCKET || 'slips',
-  accessKeyId: process.env.S3_ACCESS_KEY_ID,
-  secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
-});
+// Lazy singleton: `next build` collects page data under Node (no `bun` module),
+// so we must not touch bun at import time — only on first real upload (runtime = Bun).
+let s3: import('bun').S3Client | undefined;
+async function getS3() {
+  if (!s3) {
+    const { S3Client } = await import('bun');
+    s3 = new S3Client({
+      endpoint: process.env.S3_ENDPOINT || 'http://localhost:9000',
+      bucket: process.env.S3_BUCKET || 'slips',
+      accessKeyId: process.env.S3_ACCESS_KEY_ID,
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY,
+    });
+  }
+  return s3;
+}
 
 // data:image/jpeg;base64,… → same shape rdcw.ts accepts. Returns [mime, ext, bytes]
 // or null if it isn't an image data-URL.
@@ -39,7 +46,7 @@ export async function uploadSlip(
   }
   const key = `${prefix}/${ref}/slip.${parsed.ext}`;
   try {
-    await s3.write(key, parsed.bytes, { type: parsed.mime });
+    await (await getS3()).write(key, parsed.bytes, { type: parsed.mime });
     return key;
   } catch (e: any) {
     console.error(`[storage] slip upload failed for ${key}: ${e?.message || e}`);

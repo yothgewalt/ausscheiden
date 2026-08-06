@@ -1,5 +1,6 @@
 import { createServer } from 'node:http';
 import { parse } from 'node:url';
+import { networkInterfaces } from 'node:os';
 import next from 'next';
 import { WebSocketServer } from 'ws';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
@@ -88,7 +89,7 @@ app.prepare().then(() => {
   server.listen(port, () => {
     console.log(`> Ready (ws /api/trpc) — ${dev ? 'dev' : 'prod'}`);
     console.log(`  - Local:   http://localhost:${port}`);
-    for (const ifaces of Object.values(require('node:os').networkInterfaces()))
+    for (const ifaces of Object.values(networkInterfaces()))
       for (const i of ifaces ?? [])
         if (i.family === 'IPv4' && !i.internal)
           console.log(`  - Network: http://${i.address}:${port}`);
