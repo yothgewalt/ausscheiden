@@ -150,6 +150,53 @@ export async function consumePaymentToken(
   return tok;
 }
 
+/**
+ * Abuse gates for the paid RDCW slip API. RDCW has a tiny hard ceiling (~115
+ * calls), so we spend it last — behind these Redis checks — to stop an abuser
+ * (or a friendly user re-uploading the same wrong slip) from draining it.
+ */
+
+// Negative cache: an image whose *intrinsic* check failed (not a slip, wrong
+// payee/bank/proxy) will fail identically forever, so remember the verdict and
+// never re-spend an API call on the same bytes. Keyed by sha256(image).
+const NEGCACHE_TTL_SEC = 60 * 60 * 24; // 24h — outlives one buying session
+export async function negCacheGet(hash: string): Promise<string | null> {
+  return pub.get(`slip:negcache:${hash}`);
+}
+export async function negCacheSet(hash: string, reason: string): Promise<void> {
+  await pub.set(`slip:negcache:${hash}`, reason, 'EX', NEGCACHE_TTL_SEC);
+}
+
+/**
+ * Fixed-window rate limit. INCR the counter; on the first hit of a new window
+ * stamp its TTL. Returns true while count <= limit, false once exceeded.
+ * ponytail: fixed window, not sliding — a burst on the window boundary can pass
+ * up to 2×limit. Fine at this scale (limit 5); swap for a sorted-set sliding
+ * window only if boundary bursts ever matter.
+ */
+export async function rateLimitHit(
+  bucket: string,
+  id: string,
+  limit: number,
+  windowSec: number
+): Promise<boolean> {
+  const k = `slip:rl:${bucket}:${id}`;
+  const count = await pub.incr(k);
+  if (count === 1) await pub.expire(k, windowSec);
+  return count <= limit;
+}
+
+// Global quota breaker: persist the usage/limit RDCW reports so we can refuse to
+// call when near the ceiling even across process restarts. No TTL — always
+// reflects the last known state.
+export async function quotaCacheRead(): Promise<{ usage: number; limit: number } | null> {
+  const raw = await pub.get('slip:quota');
+  return raw ? (JSON.parse(raw) as { usage: number; limit: number }) : null;
+}
+export async function quotaCacheWrite(usage: number, limit: number): Promise<void> {
+  await pub.set('slip:quota', JSON.stringify({ usage, limit }));
+}
+
 // One 'message' listener for the whole process, fanning out to a Set of
 // callbacks. Registering a listener per subscriber leaked them onto the shared
 // `sub` connection and tripped MaxListenersExceededWarning past 10 clients.
@@ -206,6 +253,25 @@ async function _demo() {
   console.assert(consumed?.transRef === 'TR-demo' && consumed?.amount === 5999, 'owner consumes token');
   const again = await consumePaymentToken(t, 'sessionA');
   console.assert(again === null, 'token is single-use');
+
+  // abuse gates: negative cache round-trips and expires the verdict per-image
+  const h = 'demohash';
+  await pub.del(`slip:negcache:${h}`);
+  console.assert((await negCacheGet(h)) === null, 'negcache empty before set');
+  await negCacheSet(h, 'wrong-bank');
+  console.assert((await negCacheGet(h)) === 'wrong-bank', 'negcache returns cached reason');
+
+  // rate limit: allows exactly `limit` hits in the window, blocks the next
+  await pub.del('slip:rl:demo:x');
+  const hits = [];
+  for (let i = 0; i < 6; i++) hits.push(await rateLimitHit('demo', 'x', 5, 60));
+  console.assert(hits.slice(0, 5).every(Boolean), 'first 5 hits allowed');
+  console.assert(hits[5] === false, '6th hit blocked');
+
+  // quota cache round-trips
+  await quotaCacheWrite(100, 115);
+  const q = await quotaCacheRead();
+  console.assert(q?.usage === 100 && q?.limit === 115, 'quota cache round-trips');
 
   console.log('redis lock self-check passed');
   process.exit(0);

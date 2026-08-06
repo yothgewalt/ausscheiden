@@ -19,14 +19,17 @@ function newSid(): string {
 
 /** Build context from a raw cookie header. `mintedSid` is set when a new id was generated
  * (the HTTP handler must then Set-Cookie it). */
-export function buildContext(cookieHeader: string | null | undefined): {
+export function buildContext(
+  cookieHeader: string | null | undefined,
+  ip: string = 'unknown'
+): {
   ctx: Context;
   mintedSid?: string;
 } {
   const existing = parseCookie(cookieHeader, SESSION_COOKIE);
   const sessionId = existing ?? newSid();
   return {
-    ctx: { db, sessionId },
+    ctx: { db, sessionId, ip },
     mintedSid: existing ? undefined : sessionId,
   };
 }

@@ -2,7 +2,19 @@
 // Docs: https://slip.rdcw.co.th/docs  •  POST https://suba.rdcw.co.th/v2/inquiry
 // Auth: HTTP Basic base64(clientId:clientSecret). Accepts raw image bytes.
 
+import { createHash } from 'node:crypto';
+
 const ENDPOINT = 'https://suba.rdcw.co.th/v2/inquiry';
+
+/**
+ * Stable content hash of a slip image data-URL — sha256 of the base64 body
+ * (falls back to the whole string if it isn't a data-URL). Used to key the
+ * negative cache so an identical image never re-spends an RDCW API call.
+ */
+export function hashSlipImage(dataUrl: string): string {
+  const body = dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl;
+  return createHash('sha256').update(body).digest('hex');
+}
 
 // Expected payee — pinned server-side, mirrors eventDetails.promptpayAccountName
 // (src/data/mockData.ts). The API masks names (e.g. "น.ส. ณัฏฐา ส"), so we match partially.
@@ -157,5 +169,13 @@ if ((import.meta as { main?: boolean }).main) {
   ok(proxyMatches('XXXXXXXXXXX1234') === false, 'wrong proxy tail rejected');
   ok(proxyMatches(null) === null, 'absent proxy → null (uncheckable)');
   ok(proxyMatches('XXXXXXXXXXX') === null, 'fully-masked proxy → null');
+  ok(
+    hashSlipImage('data:image/png;base64,AAAA') === hashSlipImage('data:image/jpeg;base64,AAAA'),
+    'hash ignores mime, keys on body'
+  );
+  ok(
+    hashSlipImage('data:image/png;base64,AAAA') !== hashSlipImage('data:image/png;base64,BBBB'),
+    'different image body → different hash'
+  );
   console.log('all rdcw self-checks passed');
 }

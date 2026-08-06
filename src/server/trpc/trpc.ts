@@ -5,6 +5,7 @@ import { db } from '../db';
 export interface Context {
   db: typeof db;
   sessionId: string;
+  ip: string; // client IP (from x-forwarded-for behind nginx) for rate limiting
 }
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });

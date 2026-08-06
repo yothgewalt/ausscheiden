@@ -23,7 +23,14 @@ app.prepare().then(() => {
     router: appRouter,
     // WS clients already carry the session cookie from their first HTTP hit;
     // just read it — no cookie to mint here, so drop mintedSid.
-    createContext: ({ req }) => buildContext(req.headers.cookie).ctx,
+    createContext: ({ req }) => {
+      const xff = req.headers['x-forwarded-for'];
+      const ip =
+        (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() ||
+        req.socket.remoteAddress ||
+        'unknown';
+      return buildContext(req.headers.cookie, ip).ctx;
+    },
   });
 
   server.on('upgrade', (req, socket, head) => {
