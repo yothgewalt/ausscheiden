@@ -15,7 +15,10 @@ services:
       # REFUSE to start if unset — no weak baked-in default to forget to override.
       DATABASE_URL: postgres://ausscheiden:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/ausscheiden
       REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET}
+      # Signs the session cookie. Optional: unset ⇒ the app mints a random
+      # per-process key (cookies reset on restart) instead of failing. Set it to
+      # keep signatures stable across restarts/redeploys.
+      SESSION_SECRET: ${SESSION_SECRET:-}
       RDCW_CLIENT_ID: ${RDCW_CLIENT_ID:-}
       RDCW_CLIENT_SECRET: ${RDCW_CLIENT_SECRET:-}
       S3_ENDPOINT: http://minio:9000

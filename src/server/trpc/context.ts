@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { db } from '../db';
 import type { Context } from './trpc';
 
@@ -12,21 +12,25 @@ export const SESSION_COOKIE = 'ausscheiden_sid';
 // passwords); dev uses a constant so `bun dev` needs no env.
 // ponytail: one secret, HS256. For zero-downtime rotation, accept a 2nd (old)
 // secret on verify.
-// Resolved LAZILY (first sign/verify), not at module load. `next build` imports
-// this module with NODE_ENV=production to collect page data, and the secret is
-// absent then — it exists only at runtime (docker-compose injects it and its
-// `:?` gate refuses to start without it). Throwing at import breaks the build;
-// throwing on first use still enforces "no prod without a secret".
+// Resolved LAZILY (first sign/verify), not at module load — `next build` imports
+// this with NODE_ENV=production to collect page data, before any runtime env.
+//
+// Missing secret must NOT crash: a defense-in-depth cookie signature is not worth
+// 500-ing a payment site. If SESSION_SECRET is unset we mint a random per-process
+// key and warn. Cookies are still SIGNED (fixation protection holds); the only
+// cost is they reset when the process restarts (single container ⇒ fine). Set
+// SESSION_SECRET to make signatures survive restarts.
 let _sessionSecret: string | undefined;
 function sessionSecret(): string {
   if (_sessionSecret !== undefined) return _sessionSecret;
-  _sessionSecret =
-    process.env.SESSION_SECRET ??
-    (process.env.NODE_ENV === 'production'
-      ? (() => {
-          throw new Error('SESSION_SECRET is required in production');
-        })()
-      : 'dev-insecure-session-secret');
+  _sessionSecret = process.env.SESSION_SECRET;
+  if (!_sessionSecret) {
+    _sessionSecret = randomBytes(32).toString('base64url');
+    console.warn(
+      '[session] SESSION_SECRET unset — using a random per-process key. ' +
+        'Cookies reset on restart. Set SESSION_SECRET to persist them.'
+    );
+  }
   return _sessionSecret;
 }
 
