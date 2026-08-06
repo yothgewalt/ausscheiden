@@ -57,7 +57,7 @@ const hosts = [
 
 // ── event agenda, moved verbatim from the former EventInfoSection ──
 const schedule = [
-  { time: '14.00 น.', titleTh: 'The Last Lecture โดย รศ. ดร. อนิราช มิ่งขวัญ', titleEn: 'The Last Lecture by Assoc Prof. Dr. Anirach Mingkwan' },
+  { time: '14.00 น.', titleTh: 'The Last Lecture โดย รศ.ดร. อนิราช มิ่งขวัญ และ ผศ. นิมิต ศรีคำทา', titleEn: 'The Last Lecture by Assoc Prof. Dr. Anirach Mingkwan' },
   { time: '16.00 น.', titleTh: 'ลงทะเบียนเข้าร่วมงานมุทิตาจิต ครบรอบ 30 ปี ภาควิชาฯ', titleEn: 'Registration & Welcome for 30th Anniversary Mutita Ceremony' },
   { time: '16.15 น.', titleTh: 'กิจกรรมกระชับความสัมพันธ์ระหว่างรุ่นพี่และรุ่นน้อง', titleEn: 'Alumni & Student Relationship Activities' },
   { time: '17.00 น.', titleTh: 'พิธีเปิดงาน', titleEn: 'Opening Ceremony' },
@@ -98,7 +98,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
   const [selectedZone, setSelectedZone] = React.useState(zones[0].id);
 
   return (
-    <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-8 sm:py-12">
+    <div className="max-w-225 mx-auto px-4 sm:px-6 py-8 sm:py-12">
       <div className="flex flex-col lg:flex-row items-start gap-8 lg:gap-12">
 
         {/* ============ LEFT SIDEBAR (sticky) ============ */}
@@ -106,18 +106,18 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full lg:w-[300px] lg:shrink-0 lg:sticky lg:top-8 self-start space-y-5"
+          className="w-full lg:w-75 lg:shrink-0 lg:sticky lg:top-8 self-start space-y-5"
         >
           {/* Cover poster — 1:1, rounded-3xl, NO shadow. Photo + dark overlay for legible text. */}
-          <div className="relative aspect-[3/2] sm:aspect-[16/9] lg:aspect-square rounded-lg overflow-hidden text-white">
+          <div className="relative aspect-2/1 sm:aspect-video lg:aspect-square rounded-lg overflow-hidden text-white">
             <img
               src="/images/front.jpg"
               alt="30 ปี ไอที: รีคอนเน็กต์"
               className="absolute inset-0 w-full h-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10" />
+            <div className="absolute inset-0 bg-linear-to-t from-black/70 via-black/25 to-black/10" />
             <div className="relative h-full flex flex-col items-center justify-center text-center p-6 sm:p-8">
-              <div className="font-display text-2xl sm:text-3xl font-[575] tracking-tight leading-tight drop-shadow-md">
+              <div className="font-display text-3xl sm:text-4xl font-[575] tracking-tight leading-tight drop-shadow-md">
                 รีคอนเน็กต์
               </div>
               <div className="text-sm sm:text-base text-white/80 drop-shadow">
@@ -215,7 +215,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
             <div className="p-5 space-y-4">
               <p className="text-sm text-muted">เลือกประเภทบัตรที่ต้องการ</p>
 
-              {/* ticket-tier radio rows — click to select, checked circle activates */}
+              {/* t`icket-tier radio rows — click to select, checked circle activates */}
               <div className="space-y-2.5">
                 {zones.map((z) => {
                   const active = selectedZone === z.id;
@@ -343,7 +343,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                     หมายเหตุเรื่องเครื่องดื่ม
                   </div>
                   <div className="text-sm text-muted mt-1 leading-relaxed">
-                    เครื่องดื่มพิเศษที่ไม่ใช่น้ำเปล่าและน้ำอัดลม จะเป็นการขายทั้งหมดภายในงาน
+                    เครื่องดื่มที่นอกเหนือจากน้ำเปล่า จะเป็นการขายทั้งหมด
                   </div>
                 </div>
               </div>
