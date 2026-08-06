@@ -79,13 +79,6 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
     return !!z && z.total > 0 && z.available === 0;
   };
 
-  // Live seat stats — identical derivation to the former LandingHero
-  const { totalBookedSeats, availableSeats } = React.useMemo(() => {
-    const totalCap = tables.reduce((s, t) => s + t.capacity, 0);
-    const booked = tables.reduce((s, t) => s + t.seats.filter((x) => x.status === 'booked').length, 0);
-    return { totalBookedSeats: booked, availableSeats: totalCap - booked };
-  }, [tables]);
-
   // Parse "วันที่ 19 กันยายน 2569" → day "19", month "ก.ย." for the calendar tile
   const [dayNum, monthAbbr] = React.useMemo(() => {
     const m = eventDetails.dateTh.match(/(\d+)\s+(\S+)/);
