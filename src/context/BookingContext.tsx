@@ -497,6 +497,7 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         major: booking.major,
         batch: booking.batch,
         bookingType: booking.bookingType,
+        slipImage,
       });
 
       if (!confirmResult.ok) {

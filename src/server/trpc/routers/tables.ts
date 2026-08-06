@@ -7,6 +7,7 @@ import { INDIVIDUAL_CAPACITY } from '../../../data/mockData';
 import * as locks from '../../redis';
 import type { LockEvent } from '../../redis';
 import type { DB } from '../../db';
+import { uploadSlip } from '../../storage';
 
 // The tx handle drizzle hands the transaction callback — same query API as DB but
 // no `$client`. Derived from DB so it tracks the schema automatically.
@@ -23,6 +24,12 @@ async function individualCapacity(db: DB | Tx): Promise<number> {
 
 const tableIdInput = z.object({ tableId: z.string().regex(/^T\d{2}$/) });
 
+// acquireLock abuse gates. The client locks one table at a time, so these are
+// generous for real buyers and only bite an automated map-locker.
+const ACQUIRE_IP_LIMIT = 30; // locks per IP per window
+const ACQUIRE_WINDOW_SEC = 60;
+const SESSION_LOCK_CAP = 3; // distinct tables one session may hold at once
+
 // Full purchase payload persisted on confirm. tableId optional — individual tickets
 // carry no table. ref is the client "BK-2026-xxxx" code (unique → idempotent re-confirm).
 // NOTE: no finalAmount here — the amount is taken from the server-minted payment
@@ -37,6 +44,7 @@ const confirmInput = z.object({
   major: z.string().min(1),
   batch: z.string().min(1),
   bookingType: z.enum(['whole_table', 'individual_seats', 'individual']),
+  slipImage: z.string().min(1), // data:image/…;base64 — archived to MinIO after commit
 });
 
 /** Effective per-table state seen by clients. */
@@ -88,9 +96,30 @@ export const tablesRouter = router({
   }),
 
   acquireLock: publicProcedure.input(tableIdInput).mutation(async ({ ctx, input }) => {
+    // Abuse gates. acquireLock is unauthenticated and holds a table for the full
+    // 10-min TTL; an HTTP-only caller (never opens the WS) is never in
+    // SessionPresence, so its locks aren't freed on disconnect. Without a limit,
+    // one client can lock the whole map (availability DoS). Two cheap gates:
+    //   • per-IP rate limit (rightmost XFF — forge-proof; see clientIpFromXff)
+    //   • per-session cap on distinct held tables (real buyers lock one at a time)
+    // Re-locking a table THIS session already holds is a refresh, not a new lock,
+    // so it bypasses the cap (checked below against the session's live lock set).
+    if (!(await locks.rateLimitHit('acquire', ctx.ip, ACQUIRE_IP_LIMIT, ACQUIRE_WINDOW_SEC))) {
+      return { ok: false as const, reason: 'rate_limited' as const };
+    }
+
     // Guard against locking a table Postgres already marks booked.
     const [row] = await ctx.db.select().from(tables).where(eq(tables.id, input.tableId));
     if (!row || row.status !== 'available') return { ok: false as const, reason: 'unavailable' as const };
+
+    // Per-session cap: count distinct tables this session already holds. A refresh
+    // of an already-held table is fine; a NEW table past the cap is refused.
+    const mine = (await locks.list()).filter((l) => l.sessionId === ctx.sessionId);
+    const alreadyHeld = mine.some((l) => l.id === input.tableId);
+    if (!alreadyHeld && mine.length >= SESSION_LOCK_CAP) {
+      return { ok: false as const, reason: 'too_many' as const };
+    }
+
     const lock = await locks.acquire(input.tableId, ctx.sessionId);
     return lock
       ? { ok: true as const, expiresAt: lock.expiresAt }
@@ -130,6 +159,17 @@ export const tablesRouter = router({
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'ยังไม่ได้ยืนยันการชำระเงิน หรือเซสชันไม่ตรงกัน กรุณาชำระเงินและอัปโหลดสลิปก่อน',
+      });
+    }
+
+    // The tier is fixed by the slip that was verified — the client can't swap it
+    // at confirm time. Without this, an `individual` token (799, minted at
+    // individual:<sid>) could confirm as `whole_table` with no tableId, storing a
+    // row that skips the individual-pool cap check below and oversells the pool.
+    if (token.bookingType !== input.bookingType) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'ประเภทการจองไม่ตรงกับการชำระเงินที่ยืนยันไว้ กรุณาเริ่มใหม่',
       });
     }
 
@@ -194,6 +234,23 @@ export const tablesRouter = router({
     // released before an uncommitted booking is not.
     if (input.tableId && result.ok) {
       await locks.release(input.tableId, ctx.sessionId);
+    }
+
+    // Archive the slip to MinIO AFTER commit — keeps the network call out of the
+    // advisory-lock critical section, and a sold-out rollback never orphans an
+    // object. Best-effort: a null (parse/outage) leaves slip_path NULL, never
+    // undoing a paid booking. The idempotent re-confirm above returns early, so a
+    // retry uploads once. ponytail: slipImage rides the wire twice (verify+confirm)
+    // — cheaper than stashing base64 in Redis between the two calls.
+    if (result.ok) {
+      const prefix = input.tableId ?? 'individual';
+      const key = await uploadSlip(prefix, input.ref, input.slipImage);
+      if (key) {
+        await ctx.db
+          .update(bookings)
+          .set({ slipPath: key })
+          .where(eq(bookings.ref, input.ref));
+      }
     }
 
     return result;

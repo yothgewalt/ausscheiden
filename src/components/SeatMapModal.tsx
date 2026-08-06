@@ -47,7 +47,7 @@ export const SeatMapModal: React.FC<SeatMapModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-0 sm:p-4 bg-[#141414]/40 backdrop-blur-md animate-fade-in">
+    <div className="fixed inset-0 z-40 flex items-center justify-center p-0 sm:p-4 bg-primary/40 backdrop-blur-md animate-fade-in">
       <div className="relative w-full h-full sm:h-auto sm:max-w-3xl sm:max-h-[90vh] bg-surface sm:rounded-lg card-shadow overflow-hidden text-primary flex flex-col">
 
         {/* Wizard Header */}

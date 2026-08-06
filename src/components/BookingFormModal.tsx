@@ -192,7 +192,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
       <div className="space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="sm:col-span-1">
-            <label className="block text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
               <User className="w-3.5 h-3.5 text-muted" />
               <span>ชื่อ-นามสกุล {req}</span>
             </label>
@@ -208,7 +208,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
               <Building2 className="w-3.5 h-3.5 text-muted" />
               <span>สาขา {req}</span>
             </label>
@@ -255,7 +255,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
               <Building2 className="w-3.5 h-3.5 text-muted" />
               <span>รุ่นที่ {req}</span>
             </label>
@@ -274,7 +274,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
               <Phone className="w-3.5 h-3.5 text-muted" />
               <span>เบอร์โทรศัพท์ {req}</span>
             </label>
@@ -290,7 +290,7 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
+            <label className="text-xs font-semibold text-primary mb-1.5 flex items-center gap-1.5">
               <Mail className="w-3.5 h-3.5 text-muted" />
               <span>อีเมล {req}</span>
             </label>

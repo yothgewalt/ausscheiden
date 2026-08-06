@@ -138,6 +138,10 @@ export interface PaymentToken {
   key: string;
   sessionId: string;
   amount: number;
+  // The tier the slip was verified against. Bound here so confirmBooking can't
+  // consume an individual-ticket token to book a different type and dodge the
+  // per-tier cap (the individual pool is physically capped; see confirmBooking).
+  bookingType: string;
 }
 const PAYTOKEN_TTL_SEC = LOCK_TTL_SEC;
 const payKey = (key: string) => `slip:paytoken:${key}`;
@@ -278,12 +282,15 @@ async function _demo() {
   console.assert(gone === null, 'released lock is gone');
 
   // payment-token mint/consume: single-use, bound to the verified slip.
-  const tok = { transRef: 'TR-demo', key: t, sessionId: 'sessionA', amount: 5999 };
+  const tok = { transRef: 'TR-demo', key: t, sessionId: 'sessionA', amount: 5999, bookingType: 'whole_table' };
   await mintPaymentToken(tok);
   const wrongSession = await consumePaymentToken(t, 'sessionB');
   console.assert(wrongSession === null, 'other session cannot consume token');
   const consumed = await consumePaymentToken(t, 'sessionA');
-  console.assert(consumed?.transRef === 'TR-demo' && consumed?.amount === 5999, 'owner consumes token');
+  console.assert(
+    consumed?.transRef === 'TR-demo' && consumed?.amount === 5999 && consumed?.bookingType === 'whole_table',
+    'owner consumes token (bookingType round-trips)'
+  );
   const again = await consumePaymentToken(t, 'sessionA');
   console.assert(again === null, 'token is single-use');
 

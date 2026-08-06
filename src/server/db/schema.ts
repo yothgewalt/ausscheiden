@@ -29,6 +29,9 @@ export const bookings = pgTable('bookings', {
   // Nullable: rows written before this column existed backfill as NULL.
   sessionId: text('session_id'),
   finalAmount: integer('final_amount').notNull(),
+  // MinIO object key for the uploaded slip: <tableId|'individual'>/<ref>/slip.<ext>.
+  // Nullable: archival is best-effort (a paid booking is never lost if upload fails).
+  slipPath: text('slip_path'),
   status: text('status').notNull().default('confirmed'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });

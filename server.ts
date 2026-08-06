@@ -10,6 +10,14 @@ import { SessionPresence } from './src/server/presence';
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
+
+// Origin allowed to open the tRPC WebSocket. Derived from the URL the browser is
+// told to dial (NEXT_PUBLIC_WS_URL): ws→http, wss→https, keep host+port, drop the
+// path. Undefined if unset (dev without the var) → the Origin check below is
+// skipped, matching dev's same-host default.
+const allowedOrigin = process.env.NEXT_PUBLIC_WS_URL
+  ? new URL(process.env.NEXT_PUBLIC_WS_URL.replace(/^ws/, 'http')).origin
+  : undefined;
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
@@ -58,6 +66,18 @@ app.prepare().then(() => {
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = parse(req.url || '');
     if (pathname === '/api/trpc') {
+      // Reject cross-origin WS handshakes (CSWSH). A browser always sends Origin;
+      // a mismatch means another site is opening the socket on a victim's behalf.
+      // No Origin at all = a non-browser client (curl, native) — allowed, since
+      // the feed is already session-scoped and leaks no foreign session ids.
+      // Allowed origin is derived from NEXT_PUBLIC_WS_URL (ws→http, wss→https) —
+      // the one host the browser is told to dial, so no new config to keep in sync.
+      const origin = req.headers.origin;
+      if (allowedOrigin && origin && origin !== allowedOrigin) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
     } else {
       // Next's HMR socket (/_next/webpack-hmr etc.) — hand back to Next.

@@ -1,15 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { BookingProvider, useBooking } from './context/BookingContext';
 import { TRPCProvider } from './components/TRPCProvider';
-import { Header } from './components/Header';
 import { EventPage } from './components/EventPage';
 import { SeatMapModal } from './components/SeatMapModal';
 import { Footer } from './components/Footer';
 import { PaymentModal } from './components/PaymentModal';
 import { CongratsModal } from './components/CongratsModal';
-import { AdminDashboard } from './components/AdminDashboard';
 
 function MainAppContent() {
   const {
@@ -37,29 +35,20 @@ function MainAppContent() {
   return (
     <div className="min-h-screen bg-page text-primary font-sans antialiased selection:bg-primary selection:text-white flex flex-col justify-between">
 
-      {/* Sticky Header Navigation bar */}
-      <Header
-      />
-
-      {/* Admin / Staff View vs Guest Flow View */}
-      {userRole === 'admin' || userRole === 'staff' ? (
-        <AdminDashboard />
-      ) : (
-        <main className="flex-1">
-          <EventPage
+      <main className="flex-1">
+        <EventPage
             onSelectTableClick={() => setIsSeatMapModalOpen(true)}
             onSelectZone={(zoneId) => {
-              if (zoneId === 'individual') {
+                if (zoneId === 'individual') {
                 setIndividualMode(true);
-              } else {
+                } else {
                 setIndividualMode(false);
                 setActiveZoneFilter(zoneId as any);
-              }
-              setIsSeatMapModalOpen(true);
+                }
+                setIsSeatMapModalOpen(true);
             }}
-          />
-        </main>
-      )}
+        />
+    </main>
 
       {/* Website Footer with Credits */}
       <Footer />

@@ -116,7 +116,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141414]/40 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-primary/40 backdrop-blur-sm animate-fade-in">
       <div className="relative w-full max-w-2xl bg-surface rounded-lg card-shadow overflow-hidden text-primary max-h-[95vh] flex flex-col">
 
         {/* Header — title + amber countdown gate + cancel in one row (ponytail: was two stacked bars).
@@ -178,7 +178,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                   alt="PromptPay QR"
                   width={220}
                   height={220}
-                  className="rounded-lg bg-surface p-2 border border-[rgba(20,20,20,0.08)]"
+                  className="rounded-lg bg-surface p-2 border border-hairline"
                 />
                 <span className="text-[14px] text-subtle">{eventDetails.promptpayAccountName}</span>
               </div>
@@ -212,7 +212,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="px-2.5 py-1 rounded-lg bg-surface btn-secondary text-xs font-bold text-primary hover:bg-[#141414]/[0.03] transition-all cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-surface btn-secondary text-xs font-bold text-primary hover:bg-primary/3 transition-all cursor-pointer"
                     >
                       เปลี่ยนรูป
                     </button>
@@ -239,8 +239,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 onDrop={handleDrop}
                 className={`cursor-pointer rounded-lg border-2 border-dashed transition-colors flex flex-col items-center justify-center gap-2 p-6 text-center outline-none ${
                   isDragging
-                    ? 'border-primary bg-primary/[0.04]'
-                    : 'border-[rgba(20,20,20,0.20)] bg-page hover:bg-[#141414]/[0.02]'
+                    ? 'border-primary bg-primary/4'
+                    : 'border-[rgba(20,20,20,0.20)] bg-page hover:bg-primary/2'
                 }`}
               >
                 <Upload className="w-5 h-5" />

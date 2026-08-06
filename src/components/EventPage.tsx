@@ -344,7 +344,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
             <h2 className="text-sm font-semibold text-primary hairline-b pb-2.5">กำหนดการวันงาน</h2>
             {schedule.map((item, i) => (
               <div key={i} className="flex items-baseline gap-3.5">
-                <span className="font-mono text-xs text-muted shrink-0 min-w-[64px]">{item.time}</span>
+                <span className="font-mono text-xs text-muted shrink-0 min-w-16">{item.time}</span>
                 <span className="text-sm text-primary leading-snug">{item.titleTh}</span>
               </div>
             ))}
@@ -360,7 +360,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
             <div className="rounded-lg overflow-hidden hairline">
               <iframe
                 src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d4896.201646141703!2d101.34342437602731!3d14.159377086276283!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x311c52d45df19391%3A0xb7d8ac93e425b86f!2z4Lir4LmJ4Lit4LiH4Lie4Lin4LiH4LmB4Liq4LiUIOC4oeC4iOC4niDguJvguKPguLLguIjguLXguJnguJrguLjguKPguLU!5e1!3m2!1sth!2sth!4v1785906095164!5m2!1sth!2sth"
-                className="w-full h-[280px]"
+                className="w-full h-70"
                 style={{ border: 0 }}
                 allowFullScreen
                 loading="lazy"

@@ -20,7 +20,7 @@ export const CongratsModal: React.FC<CongratsModalProps> = ({
   return (
     <div
       onClick={(e) => e.target === e.currentTarget && onClose()}
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#141414]/40 backdrop-blur-sm animate-fade-in cursor-pointer"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-primary/40 backdrop-blur-sm animate-fade-in cursor-pointer"
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -48,7 +48,7 @@ export const CongratsModal: React.FC<CongratsModalProps> = ({
           </div>
 
           {/* Read-only summary — whitespace + hairline, not a card (luma taste). */}
-          <dl className="w-full text-sm border-t border-[rgba(20,20,20,0.08)] pt-4 space-y-2">
+          <dl className="w-full text-sm border-t border-hairline pt-4 space-y-2">
             <div className="flex items-baseline justify-between gap-3">
               <dt className="text-muted shrink-0">รหัสจอง</dt>
               <dd className="font-mono font-semibold text-primary text-right">{booking.id}</dd>

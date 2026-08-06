@@ -64,7 +64,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({ onSelectTable }) => {
             <span>รอชำระ/บางส่วน</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#141414]/[0.12]"></span>
+            <span className="w-2.5 h-2.5 rounded-full bg-primary/12"></span>
             <span>เต็มแล้ว</span>
           </div>
           <div className="flex items-center gap-1.5">
@@ -104,7 +104,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({ onSelectTable }) => {
                     return (
                       <div
                         key="teacher-zone-bar"
-                        className="row-span-2 col-start-5 row-start-1 bg-page hairline text-muted font-semibold rounded-md flex items-center justify-center p-1 text-center text-xs tracking-widest select-none w-full h-full min-h-[76px] [writing-mode:vertical-rl] z-10"
+                        className="row-span-2 col-start-5 row-start-1 bg-page hairline text-muted font-semibold rounded-md flex items-center justify-center p-1 text-center text-xs tracking-widest select-none w-full h-full min-h-19 [writing-mode:vertical-rl] z-10"
                       >
                         โต๊ะอาจารย์
                       </div>
@@ -215,7 +215,7 @@ export const SeatMap: React.FC<SeatMapProps> = ({ onSelectTable }) => {
             </div>
 
             {/* Beverage Counter (จำหน่ายเครื่องดื่ม) on far right */}
-            <div className="w-9 bg-page hairline rounded-lg flex items-center justify-center py-3 text-primary font-semibold text-xs tracking-widest select-none text-center [writing-mode:vertical-rl] min-h-[220px]">
+            <div className="w-9 bg-page hairline rounded-lg flex items-center justify-center py-3 text-primary font-semibold text-xs tracking-widest select-none text-center [writing-mode:vertical-rl] min-h-55">
               จำหน่ายเครื่องดื่ม
             </div>
 

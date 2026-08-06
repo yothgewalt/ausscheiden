@@ -179,6 +179,7 @@ export const slipsRouter = router({
         key: tokenKey,
         sessionId: ctx.sessionId,
         amount: expectedAmount,
+        bookingType: input.bookingType,
       });
 
       return {
