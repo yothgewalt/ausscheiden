@@ -1,7 +1,7 @@
 import React from 'react';
 import { useBooking } from '../context/BookingContext';
 import { INDIVIDUAL_PRICE, INDIVIDUAL_CAPACITY } from '../data/mockData';
-import { MapPin, ArrowRight, Shirt, Wine, AlertTriangle, ChevronRight, Check } from 'lucide-react';
+import { MapPin, ArrowRight, Shirt, Wine, AlertTriangle, ChevronRight, Check, ExternalLink } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface EventPageProps {
@@ -57,6 +57,7 @@ const hosts = [
 
 // ── event agenda, moved verbatim from the former EventInfoSection ──
 const schedule = [
+  { time: '14.00 น.', titleTh: 'The Last Lecture โดย รศ. ดร. อนิราช มิ่งขวัญ', titleEn: 'The Last Lecture by Assoc Prof. Dr. Anirach Mingkwan' },
   { time: '16.00 น.', titleTh: 'ลงทะเบียนเข้าร่วมงานมุทิตาจิต ครบรอบ 30 ปี ภาควิชาฯ', titleEn: 'Registration & Welcome for 30th Anniversary Mutita Ceremony' },
   { time: '16.15 น.', titleTh: 'กิจกรรมกระชับความสัมพันธ์ระหว่างรุ่นพี่และรุ่นน้อง', titleEn: 'Alumni & Student Relationship Activities' },
   { time: '17.00 น.', titleTh: 'พิธีเปิดงาน', titleEn: 'Opening Ceremony' },
@@ -209,7 +210,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
           {/* ===== REGISTRATION WIDGET — the ONE .card-shadow on the page ===== */}
           <div className="rounded-lg bg-surface card-shadow overflow-hidden">
             <div className="px-5 py-2 border-b-[0.5px] border-b-hairline">
-              <span className="text-base font-bold text-primary">ลงทะเบียน</span>
+              <span className="text-base font-bold text-primary">ลงทะเบียนงานครบรอบ 30 ปี ภาควิชาฯ</span>
             </div>
             <div className="p-5 space-y-4">
               <p className="text-sm text-muted">เลือกประเภทบัตรที่ต้องการ</p>
@@ -290,6 +291,29 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
               </button>
             </div>
           </div>
+
+          {/* ===== External register box — Google Form, opens new tab. Renders only when URL set ===== */}
+          {eventDetails.registerFormUrl && (
+            <div className="rounded-lg bg-surface card-shadow overflow-hidden">
+              <div className="px-5 py-2 border-b-[0.5px] border-b-hairline">
+                <span className="text-base font-bold text-primary">ลงทะเบียนงาน The Last Lecture</span>
+              </div>
+              <div className="p-5 space-y-4">
+                <p className="text-sm text-muted">
+                  ลงทะเบียนเข้าร่วมงานผ่านแบบฟอร์มออนไลน์ (เปิดในแท็บใหม่)
+                </p>
+                <a
+                  href={eventDetails.registerFormUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-3 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer group"
+                >
+                  <span>ลงทะเบียนผ่านฟอร์ม</span>
+                  <ExternalLink className="w-4 h-4 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform" />
+                </a>
+              </div>
+            </div>
+          )}
 
           {/* ===== About Event — flat prose, hairline header rule, NO card ===== */}
           <motion.section

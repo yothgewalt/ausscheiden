@@ -7,8 +7,8 @@ export const initialEventDetails: EventDetails = {
   subtitleEn: '30th Anniversary & Mutita Celebration Evening (Theme: Gangster 2499)',
   dateTh: 'วันที่ 19 กันยายน 2569',
   dateEn: 'September 19, 2026',
-  timeTh: '16.00 - 21.00 น.',
-  timeEn: '16:00 - 21:00',
+  timeTh: '14.00 - 21.00 น.',
+  timeEn: '14:00 - 21:00',
   venueTh: 'ห้องพวงแสด คณะเทคโนโลยีและการจัดการอุตสาหกรรม',
   venueEn: 'Puang Saed Room, Faculty of Industrial Technology and Management',
   organizerTh: 'ภาควิชาเทคโนโลยีสารสนเทศ คณะเทคโนโลยีสารสนเทศ และการจัดการเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยเทคโนโลยีพระจอมเกล้าพระนครเหนือ วิทยาเขตปราจีนบุรี',
@@ -19,6 +19,7 @@ export const initialEventDetails: EventDetails = {
   bankName: 'ธนาคารกสิกรไทย (K Bank)',
   bankAccountNumber: '137-3-88189-5',
   lockTimeoutMinutes: 10,
+  registerFormUrl: 'https://forms.gle/TmAKXAsF6NRVmVKG7', // Google Form registration (opens new tab)
 };
 
 // Generate initial 70 tables layout (8 seats per table): 60 alumni + 10 student.

@@ -123,4 +123,5 @@ export interface EventDetails {
   bankName: string;
   bankAccountNumber: string;
   lockTimeoutMinutes: number;
+  registerFormUrl?: string; // external Google Form registration link (opens new tab); box hidden when empty
 }
