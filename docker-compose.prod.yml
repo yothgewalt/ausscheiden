@@ -43,6 +43,10 @@ services:
       POSTGRES_USER: ausscheiden
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ausscheiden
+    ports:
+      # Published for external DB tools. Loopback on the prod host by default
+      # (reach via SSH tunnel); set DB_BIND=0.0.0.0 in .env to open to the network.
+      - "${DB_BIND:-127.0.0.1}:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -79,6 +83,11 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    ports:
+      # 9000 = S3 API, 9001 = web console. Same loopback default as postgres;
+      # set MINIO_BIND=0.0.0.0 in .env to reach it across the network.
+      - "${MINIO_BIND:-127.0.0.1}:9000:9000"
+      - "${MINIO_BIND:-127.0.0.1}:9001:9001"
     volumes:
       - miniodata:/data
 
