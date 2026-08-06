@@ -63,6 +63,8 @@ interface BookingContextType {
   startSeatLock: (buyerData: {
     buyerName: string;
     department: string;
+    major: string;
+    batch: string;
     phone: string;
     email: string;
     lineId?: string;
@@ -71,6 +73,8 @@ interface BookingContextType {
   startIndividualLock: (buyerData: {
     buyerName: string;
     department: string;
+    major: string;
+    batch: string;
     phone: string;
     email: string;
     lineId?: string;
@@ -263,6 +267,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const startSeatLock = (buyerData: {
     buyerName: string;
     department: string;
+    major: string;
+    batch: string;
     phone: string;
     email: string;
     lineId?: string;
@@ -294,6 +300,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: nowStr,
       buyerName: buyerData.buyerName,
       department: buyerData.department,
+      major: buyerData.major,
+      batch: buyerData.batch,
       phone: buyerData.phone,
       email: buyerData.email,
       lineId: buyerData.lineId,
@@ -352,6 +360,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const startIndividualLock = (buyerData: {
     buyerName: string;
     department: string;
+    major: string;
+    batch: string;
     phone: string;
     email: string;
     lineId?: string;
@@ -367,6 +377,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedAt: nowStr,
       buyerName: buyerData.buyerName,
       department: buyerData.department,
+      major: buyerData.major,
+      batch: buyerData.batch,
       phone: buyerData.phone,
       email: buyerData.email,
       lineId: buyerData.lineId,
@@ -488,6 +500,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         phone: booking.phone,
         email: booking.email,
         lineId: booking.lineId,
+        major: booking.major,
+        batch: booking.batch,
         bookingType: booking.bookingType,
       });
 

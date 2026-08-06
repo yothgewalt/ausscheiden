@@ -21,6 +21,9 @@ export const bookings = pgTable('bookings', {
   phone: text('phone').notNull(),
   email: text('email').notNull(),
   lineId: text('line_id'),
+  // Academic info from the form. Nullable: prod rows predate these columns.
+  major: text('major'),
+  batch: text('batch'),
   bookingType: text('booking_type').notNull(), // 'whole_table' | 'individual_seats' | 'individual'
   finalAmount: integer('final_amount').notNull(),
   status: text('status').notNull().default('confirmed'),

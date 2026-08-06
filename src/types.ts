@@ -47,7 +47,9 @@ export interface Booking {
   
   // Buyer details
   buyerName: string;
-  department: string;
+  department: string; // client-derived display string: "สาขา (รุ่น X)"
+  major: string;
+  batch: string;
   phone: string;
   email: string;
   lineId?: string;

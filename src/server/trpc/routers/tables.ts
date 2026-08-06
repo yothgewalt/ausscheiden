@@ -30,6 +30,8 @@ const confirmInput = z.object({
   phone: z.string().min(1),
   email: z.string().min(1),
   lineId: z.string().optional(),
+  major: z.string().min(1),
+  batch: z.string().min(1),
   bookingType: z.enum(['whole_table', 'individual_seats', 'individual']),
 });
 
@@ -153,6 +155,8 @@ export const tablesRouter = router({
         phone: input.phone,
         email: input.email,
         lineId: input.lineId,
+        major: input.major,
+        batch: input.batch,
         bookingType: input.bookingType,
         finalAmount: token.amount,
       })

@@ -109,11 +109,13 @@ export const BookingFormModal: React.FC<BookingFormModalProps> = ({
 
     try {
       if (individual) {
-        startIndividualLock({ buyerName, department: formattedDepartment, phone, email });
+        startIndividualLock({ buyerName, department: formattedDepartment, major, batch: batch.trim(), phone, email });
       } else {
         startSeatLock({
           buyerName,
           department: formattedDepartment,
+          major,
+          batch: batch.trim(),
           phone,
           email,
           guestNames: {},
