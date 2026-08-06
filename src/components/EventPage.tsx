@@ -78,6 +78,11 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
     return !!z && z.total > 0 && z.available === 0;
   };
 
+  // zoneAvailability is {} until zoneQuery resolves. Gate counts + badge on this so
+  // they show a skeleton instead of flashing a wrong 0/green then snapping to real data.
+  const zonesReady = Object.keys(zoneAvailability).length > 0;
+  const Sk = () => <span className="inline-block w-6 h-3.5 rounded bg-[rgba(20,20,20,0.12)] align-middle" />;
+
   // Parse "วันที่ 19 กันยายน 2569" → day "19", month "ก.ย." for the calendar tile
   const [dayNum, monthAbbr] = React.useMemo(() => {
     const m = eventDetails.dateTh.match(/(\d+)\s+(\S+)/);
@@ -234,25 +239,27 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                           <span className={`text-sm truncate ${active ? 'font-semibold text-primary' : 'font-medium text-primary'}`}>
                             {z.titleTh}
                           </span>
-                          {/* Live individual cap notice — falls back to full 16 before the query loads */}
+                          {/* Live counts gated on zonesReady — skeleton until the query resolves, no 0→real flicker */}
                           {z.id === 'individual' && (
                             <span className="text-xs text-muted">
-                              จำกัด {zoneAvailability.individual?.total ?? INDIVIDUAL_CAPACITY} ที่นั่ง · เหลือ {zoneAvailability.individual?.available ?? INDIVIDUAL_CAPACITY}
+                              จำกัด {zonesReady ? zoneAvailability.individual?.total ?? INDIVIDUAL_CAPACITY : <Sk />} ที่นั่ง · เหลือ {zonesReady ? zoneAvailability.individual?.available ?? INDIVIDUAL_CAPACITY : <Sk />}
                             </span>
                           )}
                           {z.id === 'alumni' && (
                             <span className="text-xs text-muted">
-                              อาหาร + เครื่องดื่ม + ของที่ระลึก · เหลือ {zoneAvailability.alumni?.available ?? 0} โต๊ะ
+                              อาหาร + เครื่องดื่ม + ของที่ระลึก · เหลือ {zonesReady ? zoneAvailability.alumni?.available ?? 0 : <Sk />} โต๊ะ
                             </span>
                           )}
                           {z.id === 'student' && (
                             <span className="text-xs text-muted">
-                                อาหาร + เครื่องดื่ม (ไม่มีของที่ระลึก) · เหลือ {zoneAvailability.student?.available ?? 0} โต๊ะ
+                                อาหาร + เครื่องดื่ม (ไม่มีของที่ระลึก) · เหลือ {zonesReady ? zoneAvailability.student?.available ?? 0 : <Sk />} โต๊ะ
                             </span>
                           )}
                         </span>
-                        {/* availability badge — green "ยังมีที่ว่าง" / red "เต็ม" when the zone is full */}
-                        {full ? (
+                        {/* availability badge — grey skeleton until ready, then green "ยังมีที่ว่าง" / red "เต็ม" */}
+                        {!zonesReady ? (
+                          <span className="shrink-0 w-14 h-5 rounded-full bg-[rgba(20,20,20,0.08)]" />
+                        ) : full ? (
                           <span className="shrink-0 px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 text-[11px] font-medium">
                             เต็ม
                           </span>
