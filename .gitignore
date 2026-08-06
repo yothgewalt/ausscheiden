@@ -15,7 +15,3 @@ graft/
 .playwright-mcp
 
 .claude
-
-# committed-by-mistake: real slip PII + app metadata — keep local, never track
-transaction.json
-metadata.json
