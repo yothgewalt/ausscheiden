@@ -86,7 +86,12 @@ app.prepare().then(() => {
   });
 
   server.listen(port, () => {
-    console.log(`> Ready on http://localhost:${port} (ws /api/trpc) — ${dev ? 'dev' : 'prod'}`);
+    console.log(`> Ready (ws /api/trpc) — ${dev ? 'dev' : 'prod'}`);
+    console.log(`  - Local:   http://localhost:${port}`);
+    for (const ifaces of Object.values(require('node:os').networkInterfaces()))
+      for (const i of ifaces ?? [])
+        if (i.family === 'IPv4' && !i.internal)
+          console.log(`  - Network: http://${i.address}:${port}`);
   });
 
   process.on('SIGTERM', () => {

@@ -39,6 +39,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Next 16 blocks cross-origin dev requests by default. Allow the LAN subnet in
+  // dev — `*` matches one octet (Next splits the origin on '.' like a hostname),
+  // so this survives DHCP reassigning the last octet.
+  allowedDevOrigins: ['192.168.1.*'],
   // /images/* are fixed-filename assets baked into the Docker image (no content
   // hash), so a redeploy can swap front.jpg behind the same URL. Cache to kill
   // the per-load 304 round-trip, but NEVER `immutable` — that would pin a stale
