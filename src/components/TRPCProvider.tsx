@@ -7,7 +7,23 @@ import superjson from 'superjson';
 import { trpc } from '../lib/trpc';
 
 export function TRPCProvider({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient());
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            // Freshness is push-driven: the tables.onLockChange WS subscription
+            // invalidates tables.list + zoneAvailability on every lock change, and
+            // invalidate() forces a refetch regardless of staleTime. A bounded 30s
+            // (not Infinity) still lets the individual-tier badge — which has NO WS
+            // invalidation, since individual confirms emit no lock event — self-heal
+            // on remount. refetchOnReconnect stays default (true) as the outage net.
+            staleTime: 30_000,
+            refetchOnWindowFocus: false,
+          },
+        },
+      }),
+  );
   const [trpcClient] = useState(() => {
     const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3000/api/trpc';
     const wsClient = createWSClient({ url: wsUrl });

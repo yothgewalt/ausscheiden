@@ -5,6 +5,8 @@ import { WebSocketServer } from 'ws';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
 import { appRouter } from './src/server/trpc/root';
 import { buildContext } from './src/server/trpc/context';
+import { releaseSelectingForSession } from './src/server/redis';
+import { SessionPresence } from './src/server/presence';
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const dev = process.env.NODE_ENV !== 'production';
@@ -18,6 +20,17 @@ app.prepare().then(() => {
 
   // tRPC subscriptions only. Next's own HMR socket (/_next/*) is left untouched.
   const wss = new WebSocketServer({ noServer: true });
+
+  // The WS connection is the client's liveness signal. When a session's last
+  // socket drops (browser quit) and stays gone past the grace window, free its
+  // pre-payment 'selecting' locks so the table doesn't sit greyed-out for the
+  // full 10-min TTL. Grace absorbs reloads/reconnects; pending_payment is spared.
+  const presence = new SessionPresence(10_000, (sessionId) => {
+    releaseSelectingForSession(sessionId).catch((e) =>
+      console.error(`[presence] release failed for ${sessionId}: ${e?.message || e}`),
+    );
+  });
+
   const trpcHandler = applyWSSHandler({
     wss,
     router: appRouter,
@@ -31,6 +44,13 @@ app.prepare().then(() => {
         'unknown';
       return buildContext(req.headers.cookie, ip).ctx;
     },
+  });
+
+  // Bind each socket to its session so presence can refcount tabs and clean up.
+  wss.on('connection', (ws, req) => {
+    const sid = buildContext(req.headers.cookie).ctx.sessionId;
+    presence.connect(sid, ws);
+    ws.on('close', () => presence.disconnect(sid, ws));
   });
 
   server.on('upgrade', (req, socket, head) => {

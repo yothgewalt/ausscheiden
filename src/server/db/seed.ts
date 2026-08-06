@@ -1,7 +1,7 @@
 import { notInArray, sql } from 'drizzle-orm';
 import { db } from './index';
-import { tables } from './schema';
-import { generateInitialTables } from '../../data/mockData';
+import { tables, settings } from './schema';
+import { generateInitialTables, INDIVIDUAL_CAPACITY } from '../../data/mockData';
 
 // Reuse the single source of truth for the 70-table layout (students {61-70},
 // rest alumni) so seed and client never drift.
@@ -36,7 +36,14 @@ async function seed() {
   // Prune rows from a prior 72-table seed (T71/T72) — only 70 tables now.
   await db.delete(tables).where(notInArray(tables.id, rows.map((r) => r.id)));
 
-  console.log(`Seeded ${rows.length} tables.`);
+  // Config singleton (id=1). onConflictDoNothing so a hand-edited capacity in the
+  // DB survives a re-seed — only the first seed writes the default.
+  await db
+    .insert(settings)
+    .values({ id: 1, individualCapacity: INDIVIDUAL_CAPACITY })
+    .onConflictDoNothing({ target: settings.id });
+
+  console.log(`Seeded ${rows.length} tables + settings.`);
   process.exit(0);
 }
 

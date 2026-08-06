@@ -2,10 +2,19 @@ import { z } from 'zod';
 import { eq, and } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure } from '../trpc';
-import { tables, bookings } from '../../db/schema';
+import { tables, bookings, settings } from '../../db/schema';
 import { INDIVIDUAL_CAPACITY } from '../../../data/mockData';
 import * as locks from '../../redis';
 import type { LockEvent } from '../../redis';
+import type { DB } from '../../db';
+
+// Live individual cap: read the singleton settings row so a DB edit takes effect
+// on the next request. Falls back to the seed default if the row isn't there yet
+// (unseeded DB), so nothing breaks before the first db:seed.
+async function individualCapacity(db: DB): Promise<number> {
+  const [row] = await db.select().from(settings).where(eq(settings.id, 1));
+  return row?.individualCapacity ?? INDIVIDUAL_CAPACITY;
+}
 
 const tableIdInput = z.object({ tableId: z.string().regex(/^T\d{2}$/) });
 
@@ -62,14 +71,12 @@ export const tablesRouter = router({
       const taken = r.status === 'booked' || r.status === 'closed' || lockById.has(r.id);
       if (!taken) z.available += 1;
     }
-    // Individual tier isn't table-backed — availability = 16 minus confirmed individual bookings.
-    // ponytail: count all individual rows (~≤16, one event); no aggregate needed.
-    const individualCount = (
-      await ctx.db.select().from(bookings).where(eq(bookings.bookingType, 'individual'))
-    ).length;
+    // Individual tier isn't table-backed — availability = cap minus confirmed individual bookings.
+    const cap = await individualCapacity(ctx.db);
+    const individualCount = await ctx.db.$count(bookings, eq(bookings.bookingType, 'individual'));
     byZone.individual = {
-      total: INDIVIDUAL_CAPACITY,
-      available: Math.max(0, INDIVIDUAL_CAPACITY - individualCount),
+      total: cap,
+      available: Math.max(0, cap - individualCount),
     };
     return byZone;
   }),
@@ -130,10 +137,9 @@ export const tablesRouter = router({
     // Ledger invariant: individual tickets cap at 16. Count existing individuals
     // and reject the 17th. (ref-already-booked was handled above.)
     if (input.bookingType === 'individual') {
-      const count = (
-        await ctx.db.select().from(bookings).where(eq(bookings.bookingType, 'individual'))
-      ).length;
-      if (count >= INDIVIDUAL_CAPACITY) return { ok: false as const, reason: 'sold_out' as const };
+      const cap = await individualCapacity(ctx.db);
+      const count = await ctx.db.$count(bookings, eq(bookings.bookingType, 'individual'));
+      if (count >= cap) return { ok: false as const, reason: 'sold_out' as const };
     }
 
     // Persist the purchase with the server-derived amount from the token.

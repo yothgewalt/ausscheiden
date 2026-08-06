@@ -27,5 +27,14 @@ export const bookings = pgTable('bookings', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 
+// Singleton config row (id always 1). Typed columns, not key-value, so you can
+// edit a value straight in the DB — `UPDATE settings SET individual_capacity = 20;`
+// — with no magic strings and DB-enforced int. New knob later = add a column + db:push.
+export const settings = pgTable('settings', {
+  id: integer('id').primaryKey().default(1),
+  individualCapacity: integer('individual_capacity').notNull().default(16),
+});
+
 export type TableRow = typeof tables.$inferSelect;
 export type BookingRow = typeof bookings.$inferSelect;
+export type SettingsRow = typeof settings.$inferSelect;

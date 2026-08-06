@@ -248,7 +248,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                           {/* Live individual cap notice — falls back to full 16 before the query loads */}
                           {z.id === 'individual' && (
                             <span className="text-xs text-muted">
-                              จำกัด {INDIVIDUAL_CAPACITY} ที่นั่ง · เหลือ {zoneAvailability.individual?.available ?? INDIVIDUAL_CAPACITY}
+                              จำกัด {zoneAvailability.individual?.total ?? INDIVIDUAL_CAPACITY} ที่นั่ง · เหลือ {zoneAvailability.individual?.available ?? INDIVIDUAL_CAPACITY}
                             </span>
                           )}
                           {z.id === 'alumni' && (

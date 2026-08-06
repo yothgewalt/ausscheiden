@@ -87,6 +87,23 @@ export async function release(id: string, sessionId: string): Promise<boolean> {
   return true;
 }
 
+/**
+ * Free every pre-payment 'selecting' lock a session holds. Called when the
+ * session's last WS socket drops (browser quit) so a table doesn't sit greyed-
+ * out for the full TTL. Skips 'pending_payment' — that's a real in-flight
+ * payment and must survive a disconnect until it expires or confirms.
+ */
+export async function releaseSelectingForSession(sessionId: string): Promise<number> {
+  const all = await list();
+  let freed = 0;
+  for (const lock of all) {
+    if (lock.sessionId === sessionId && lock.phase === 'selecting') {
+      if (await release(lock.id, sessionId)) freed++;
+    }
+  }
+  return freed;
+}
+
 /** All live locks, for merging into availability. */
 export async function list(): Promise<Lock[]> {
   const keys = await pub.keys(keyOf('*'));
