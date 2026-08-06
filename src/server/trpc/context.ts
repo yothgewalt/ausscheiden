@@ -12,16 +12,26 @@ export const SESSION_COOKIE = 'ausscheiden_sid';
 // passwords); dev uses a constant so `bun dev` needs no env.
 // ponytail: one secret, HS256. For zero-downtime rotation, accept a 2nd (old)
 // secret on verify.
-const SESSION_SECRET =
-  process.env.SESSION_SECRET ??
-  (process.env.NODE_ENV === 'production'
-    ? (() => {
-        throw new Error('SESSION_SECRET is required in production');
-      })()
-    : 'dev-insecure-session-secret');
+// Resolved LAZILY (first sign/verify), not at module load. `next build` imports
+// this module with NODE_ENV=production to collect page data, and the secret is
+// absent then — it exists only at runtime (docker-compose injects it and its
+// `:?` gate refuses to start without it). Throwing at import breaks the build;
+// throwing on first use still enforces "no prod without a secret".
+let _sessionSecret: string | undefined;
+function sessionSecret(): string {
+  if (_sessionSecret !== undefined) return _sessionSecret;
+  _sessionSecret =
+    process.env.SESSION_SECRET ??
+    (process.env.NODE_ENV === 'production'
+      ? (() => {
+          throw new Error('SESSION_SECRET is required in production');
+        })()
+      : 'dev-insecure-session-secret');
+  return _sessionSecret;
+}
 
 function sign(sid: string): string {
-  return createHmac('sha256', SESSION_SECRET).update(sid).digest('base64url');
+  return createHmac('sha256', sessionSecret()).update(sid).digest('base64url');
 }
 
 /** Verify a `sid.sig` cookie value; returns the sid only if the signature is
