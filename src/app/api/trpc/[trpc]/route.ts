@@ -1,13 +1,14 @@
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import { appRouter } from '../../../../server/trpc/root';
-import { buildContext, SESSION_COOKIE } from '../../../../server/trpc/context';
+import { buildContext, clientIpFromXff, sessionCookie } from '../../../../server/trpc/context';
 
 // Queries + mutations ride HTTP here; subscriptions ride the WS path (server.ts).
 async function handler(req: Request) {
-  // Client IP for rate limiting. Behind the shared nginx, x-forwarded-for is set
-  // by the proxy and the app is only reachable through it, so the first hop is
-  // the real client. Fall back to 'unknown' so a missing header can't crash.
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  // Client IP for rate limiting. Behind the shared nginx the app is only
+  // reachable through the proxy, which appends the peer it saw as the RIGHTMOST
+  // X-Forwarded-For hop; the leftmost is attacker-controlled. clientIpFromXff
+  // takes the rightmost so a forged header can't dodge per-IP limits.
+  const ip = clientIpFromXff(req.headers.get('x-forwarded-for'));
   const { ctx, mintedSid } = buildContext(req.headers.get('cookie'), ip);
 
   const res = await fetchRequestHandler({
@@ -18,10 +19,7 @@ async function handler(req: Request) {
   });
 
   if (mintedSid) {
-    res.headers.append(
-      'Set-Cookie',
-      `${SESSION_COOKIE}=${mintedSid}; Path=/; SameSite=Lax; Max-Age=86400`,
-    );
+    res.headers.append('Set-Cookie', sessionCookie(mintedSid));
   }
   return res;
 }

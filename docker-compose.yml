@@ -1,3 +1,7 @@
+# Dev only. Ports bind to 127.0.0.1 so Postgres/Redis are reachable from THIS
+# machine, never the LAN (Docker's default "5432:5432" publishes on 0.0.0.0).
+# The weak password is a localhost-only dev convenience — PROD creds are required
+# env vars + Redis requirepass, see docker-compose.prod.yml.
 services:
   postgres:
     image: postgres:17-alpine
@@ -7,7 +11,7 @@ services:
       POSTGRES_PASSWORD: ausscheiden
       POSTGRES_DB: ausscheiden
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +24,7 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { TRPCError } from '@trpc/server';
 import { router, publicProcedure } from '../trpc';
 import { tables, bookings, settings } from '../../db/schema';
@@ -8,10 +8,15 @@ import * as locks from '../../redis';
 import type { LockEvent } from '../../redis';
 import type { DB } from '../../db';
 
+// The tx handle drizzle hands the transaction callback — same query API as DB but
+// no `$client`. Derived from DB so it tracks the schema automatically.
+type Tx = Parameters<Parameters<DB['transaction']>[0]>[0];
+
 // Live individual cap: read the singleton settings row so a DB edit takes effect
 // on the next request. Falls back to the seed default if the row isn't there yet
-// (unseeded DB), so nothing breaks before the first db:seed.
-async function individualCapacity(db: DB): Promise<number> {
+// (unseeded DB), so nothing breaks before the first db:seed. Accepts a tx too, so
+// the confirm path can read the cap inside its atomic section.
+async function individualCapacity(db: DB | Tx): Promise<number> {
   const [row] = await db.select().from(settings).where(eq(settings.id, 1));
   return row?.individualCapacity ?? INDIVIDUAL_CAPACITY;
 }
@@ -29,7 +34,6 @@ const confirmInput = z.object({
   buyerName: z.string().min(1),
   phone: z.string().min(1),
   email: z.string().min(1),
-  lineId: z.string().optional(),
   major: z.string().min(1),
   batch: z.string().min(1),
   bookingType: z.enum(['whole_table', 'individual_seats', 'individual']),
@@ -111,12 +115,15 @@ export const tablesRouter = router({
     // THAT, never a client-supplied price.
     const tokenKey = input.tableId ?? `individual:${ctx.sessionId}`;
 
-    // Idempotent re-confirm: if this ref already booked, the token is long gone.
-    // Return the existing row instead of demanding a fresh (already-consumed) token.
+    // Idempotent re-confirm, scoped to the OWNER session. A network retry from the
+    // buyer returns their existing row (its token is already consumed and gone).
+    // A ref that is NOT this session's — foreign or nonexistent — falls through to
+    // the token gate below and is rejected identically, so this can't be used to
+    // probe whether an arbitrary ref exists (no id/existence oracle), and a ref
+    // collision can't route a paying buyer into someone else's confirmed booking.
     const already = await ctx.db.select().from(bookings).where(eq(bookings.ref, input.ref));
-    if (already.length > 0) {
-      return { ok: true as const, id: already[0].id };
-    }
+    const mine = already.find((b) => b.sessionId === ctx.sessionId);
+    if (mine) return { ok: true as const, id: mine.id };
 
     const token = await locks.consumePaymentToken(tokenKey, ctx.sessionId);
     if (!token) {
@@ -136,49 +143,69 @@ export const tablesRouter = router({
       }
     }
 
-    // Ledger invariant: individual tickets cap at 16. Count existing individuals
-    // and reject the 17th. (ref-already-booked was handled above.)
-    if (input.bookingType === 'individual') {
-      const cap = await individualCapacity(ctx.db);
-      const count = await ctx.db.$count(bookings, eq(bookings.bookingType, 'individual'));
-      if (count >= cap) return { ok: false as const, reason: 'sold_out' as const };
-    }
+    // Atomic booking. The individual-tier cap check + insert MUST be serialized
+    // against concurrent individual confirms — otherwise two callers each read
+    // count < cap and both insert, overselling past the cap (the count and the
+    // insert were a check-then-act TOCTOU). A transaction-scoped Postgres advisory
+    // lock makes count→insert one critical section; it auto-releases on commit or
+    // rollback. onConflictDoNothing(ref) + the unique ref index is the final
+    // backstop against any duplicate row.
+    const result = await ctx.db.transaction(async (tx) => {
+      if (input.bookingType === 'individual') {
+        // ponytail: one fixed key for the sole capped pool. Per-pool keys if a
+        // second capped tier is ever added.
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(423042)`);
+        const cap = await individualCapacity(tx);
+        const count = await tx.$count(bookings, eq(bookings.bookingType, 'individual'));
+        if (count >= cap) return { ok: false as const, reason: 'sold_out' as const };
+      }
 
-    // Persist the purchase with the server-derived amount from the token.
-    // onConflictDoNothing(ref): a racing duplicate is a no-op, never a second row.
-    const [row] = await ctx.db
-      .insert(bookings)
-      .values({
-        ref: input.ref,
-        tableId: input.tableId,
-        buyerName: input.buyerName,
-        phone: input.phone,
-        email: input.email,
-        lineId: input.lineId,
-        major: input.major,
-        batch: input.batch,
-        bookingType: input.bookingType,
-        finalAmount: token.amount,
-      })
-      .onConflictDoNothing({ target: bookings.ref })
-      .returning({ id: bookings.id });
+      const [row] = await tx
+        .insert(bookings)
+        .values({
+          ref: input.ref,
+          tableId: input.tableId,
+          buyerName: input.buyerName,
+          phone: input.phone,
+          email: input.email,
+          major: input.major,
+          batch: input.batch,
+          bookingType: input.bookingType,
+          sessionId: ctx.sessionId,
+          finalAmount: token.amount,
+        })
+        .onConflictDoNothing({ target: bookings.ref })
+        .returning({ id: bookings.id });
 
-    // Table-bound booking: mark it booked and drop the Redis lock. Scope the
-    // update to an available row so we never flip a table someone else already
-    // booked. Individual tickets have no table, so skip both.
-    if (input.tableId) {
-      await ctx.db
-        .update(tables)
-        .set({ status: 'booked' })
-        .where(and(eq(tables.id, input.tableId), eq(tables.status, 'available')));
+      // Table-bound booking: mark it booked. Scope the update to an available row
+      // so we never flip a table someone else already booked.
+      if (input.tableId) {
+        await tx
+          .update(tables)
+          .set({ status: 'booked' })
+          .where(and(eq(tables.id, input.tableId), eq(tables.status, 'available')));
+      }
+
+      return { ok: true as const, id: row?.id ?? null };
+    });
+
+    // Drop the Redis lock only AFTER the DB commit. It's Redis (not part of the
+    // Postgres tx): a table that stays locked a moment longer is harmless, a lock
+    // released before an uncommitted booking is not.
+    if (input.tableId && result.ok) {
       await locks.release(input.tableId, ctx.sessionId);
     }
 
-    return { ok: true as const, id: row?.id ?? null };
+    return result;
   }),
 
   // Live lock changes for every client. Bridges Redis pub/sub -> async generator.
-  onLockChange: publicProcedure.subscription(async function* () {
+  // Yields a session-scoped view {id, phase, mine} — NEVER the raw sessionId.
+  // The old event leaked every other client's session id to every subscriber
+  // (any listener could harvest ids and impersonate a session on the unsigned
+  // cookie). `mine` is computed here against THIS subscriber's ctx.sessionId, so
+  // a client learns "this lock is mine" without ever seeing a foreign id.
+  onLockChange: publicProcedure.subscription(async function* ({ ctx }) {
     const queue: LockEvent[] = [];
     let resolve: (() => void) | null = null;
     const unsub = locks.onLockEvent((evt) => {
@@ -191,7 +218,10 @@ export const tablesRouter = router({
         if (queue.length === 0) {
           await new Promise<void>((r) => (resolve = r));
         }
-        while (queue.length > 0) yield queue.shift()!;
+        while (queue.length > 0) {
+          const evt = queue.shift()!;
+          yield { id: evt.id, phase: evt.phase, mine: evt.sessionId === ctx.sessionId };
+        }
       }
     } finally {
       unsub();

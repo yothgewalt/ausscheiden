@@ -11,8 +11,10 @@ services:
     environment:
       NODE_ENV: production
       PORT: "3000"
-      DATABASE_URL: postgres://ausscheiden:ausscheiden@postgres:5432/ausscheiden
-      REDIS_URL: redis://redis:6379
+      # Credentials come from the environment (see .env.example). `:?` makes compose
+      # REFUSE to start if unset — no weak baked-in default to forget to override.
+      DATABASE_URL: postgres://ausscheiden:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/ausscheiden
+      REDIS_URL: redis://:${REDIS_PASSWORD:?set REDIS_PASSWORD}@redis:6379
       RDCW_CLIENT_ID: ${RDCW_CLIENT_ID:-}
       RDCW_CLIENT_SECRET: ${RDCW_CLIENT_SECRET:-}
     depends_on:
@@ -32,7 +34,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ausscheiden
-      POSTGRES_PASSWORD: ausscheiden
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
       POSTGRES_DB: ausscheiden
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -45,10 +47,18 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    # requirepass: Redis holds payment tokens + locks. On a shared host an
+    # unauthenticated Redis is a trivial pivot — a token forged straight into the
+    # keyspace confirms a booking. Auth it; the app dials redis://:PASSWORD@redis.
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
+    environment:
+      # So the healthcheck's redis-cli -a can read it inside the container.
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     volumes:
       - redisdata:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # -a must carry the password now, else PING returns NOAUTH and health flaps.
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 5

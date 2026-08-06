@@ -149,22 +149,38 @@ export async function mintPaymentToken(tok: PaymentToken): Promise<void> {
 /**
  * Read the token for `key`, delete it, and return it — but only if it belongs
  * to `sessionId` (otherwise null, token left for the rightful owner).
- * ponytail: GET+guard+DEL, not a single atomic op, so two confirms from the
- * SAME session could both read before either deletes. That's harmless: the
- * caller's `update(tables) WHERE status='available'` + `onConflictDoNothing(ref)`
- * make the booking itself single-shot. Move to a Lua GETDEL-with-guard only if a
- * cross-session replay ever matters here.
+ *
+ * Atomic GETDEL-with-session-guard in one Lua eval: GET, decode, compare
+ * sessionId, DEL only on match — Redis runs the whole script single-threaded so
+ * two concurrent confirms can never both observe the token before it's deleted.
+ * Returns nil (→ null) on miss OR session mismatch; only the rightful owner both
+ * gets the token AND removes it, making it strictly single-use.
  */
+const CONSUME_TOKEN_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+if not string.find(raw, ARGV[1], 1, true) then return nil end
+local tok = cjson.decode(raw)
+if tok.sessionId ~= ARGV[2] then return nil end
+redis.call('DEL', KEYS[1])
+return raw
+`;
 export async function consumePaymentToken(
   key: string,
   sessionId: string
 ): Promise<PaymentToken | null> {
-  const raw = await pub.get(payKey(key));
-  if (!raw) return null;
-  const tok = JSON.parse(raw) as PaymentToken;
-  if (tok.sessionId !== sessionId) return null;
-  await pub.del(payKey(key));
-  return tok;
+  // Pre-filter with a literal substring match on the encoded sessionId before
+  // cjson.decode so a mismatch skips the parse; the authoritative check is the
+  // decoded tok.sessionId compare. Session ids are crypto.randomUUID, so the
+  // JSON-encoded form is unambiguous.
+  const raw = (await pub.eval(
+    CONSUME_TOKEN_LUA,
+    1,
+    payKey(key),
+    JSON.stringify(sessionId).slice(1, -1),
+    sessionId
+  )) as string | null;
+  return raw ? (JSON.parse(raw) as PaymentToken) : null;
 }
 
 /**

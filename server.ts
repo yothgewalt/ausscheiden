@@ -4,7 +4,7 @@ import next from 'next';
 import { WebSocketServer } from 'ws';
 import { applyWSSHandler } from '@trpc/server/adapters/ws';
 import { appRouter } from './src/server/trpc/root';
-import { buildContext } from './src/server/trpc/context';
+import { buildContext, clientIpFromXff } from './src/server/trpc/context';
 import { releaseSelectingForSession } from './src/server/redis';
 import { SessionPresence } from './src/server/presence';
 
@@ -37,11 +37,13 @@ app.prepare().then(() => {
     // WS clients already carry the session cookie from their first HTTP hit;
     // just read it — no cookie to mint here, so drop mintedSid.
     createContext: ({ req }) => {
+      // Rightmost XFF hop (see clientIpFromXff) — the address the trusted proxy
+      // saw, not the client-forgeable leftmost. Fall back to the raw socket peer.
       const xff = req.headers['x-forwarded-for'];
-      const ip =
-        (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim() ||
-        req.socket.remoteAddress ||
-        'unknown';
+      const ip = clientIpFromXff(
+        Array.isArray(xff) ? xff.join(',') : xff,
+        req.socket.remoteAddress || 'unknown'
+      );
       return buildContext(req.headers.cookie, ip).ctx;
     },
   });

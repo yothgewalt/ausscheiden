@@ -2,7 +2,6 @@ import React from 'react';
 import { useBooking } from '../context/BookingContext';
 import { INDIVIDUAL_PRICE, INDIVIDUAL_CAPACITY } from '../data/mockData';
 import { MapPin, ArrowRight, Shirt, Wine, AlertTriangle, ChevronRight, Check, ExternalLink } from 'lucide-react';
-import { motion } from 'motion/react';
 
 interface EventPageProps {
   onSelectTableClick: () => void;
@@ -95,10 +94,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
       <div className="flex flex-col lg:flex-row items-start gap-8 lg:gap-12">
 
         {/* ============ LEFT SIDEBAR (sticky) ============ */}
-        <motion.aside
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+        <aside
           className="w-full lg:w-75 lg:shrink-0 lg:sticky lg:top-8 self-start space-y-5"
         >
           {/* Cover poster — 1:1, rounded-3xl, NO shadow. Photo + dark overlay for legible text. */}
@@ -158,7 +154,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
               ))}
             </div>
           </div>
-        </motion.aside>
+        </aside>
 
         {/* ============ RIGHT MAIN COLUMN ============ */}
         <div className="w-full lg:flex-1 lg:min-w-0 space-y-6">
@@ -309,13 +305,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
           )}
 
           {/* ===== About Event — flat prose, hairline header rule, NO card ===== */}
-          <motion.section
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.5 }}
-            className="space-y-4"
-          >
+          <section className="space-y-4">
             <h2 className="text-sm font-semibold text-primary hairline-b pb-2.5">เกี่ยวกับงาน</h2>
             <p className="text-base text-muted leading-relaxed">{eventDetails.subtitleTh}</p>
 
@@ -347,16 +337,10 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
               <span className="font-medium text-primary">หมายเหตุ:</span>
               <span>เมื่อซื้อบัตรแล้ว จะไม่สามารถคืนเงินได้</span>
             </div>
-          </motion.section>
+          </section>
 
           {/* ===== Schedule — flat list, hairline header rule ===== */}
-          <motion.section
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.5 }}
-            className="space-y-3"
-          >
+          <section className="space-y-3">
             <h2 className="text-sm font-semibold text-primary hairline-b pb-2.5">กำหนดการวันงาน</h2>
             {schedule.map((item, i) => (
               <div key={i} className="flex items-baseline gap-3.5">
@@ -364,7 +348,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                 <span className="text-sm text-primary leading-snug">{item.titleTh}</span>
               </div>
             ))}
-          </motion.section>
+          </section>
 
           {/* ===== Location — venue prose + embedded Google Map ===== */}
           <section className="space-y-3">

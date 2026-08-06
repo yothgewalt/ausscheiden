@@ -20,11 +20,14 @@ export const bookings = pgTable('bookings', {
   buyerName: text('buyer_name').notNull(),
   phone: text('phone').notNull(),
   email: text('email').notNull(),
-  lineId: text('line_id'),
   // Academic info from the form. Nullable: prod rows predate these columns.
   major: text('major'),
   batch: text('batch'),
   bookingType: text('booking_type').notNull(), // 'whole_table' | 'individual_seats' | 'individual'
+  // Session that created the row. Scopes the idempotent re-confirm to its owner
+  // so a foreign ref can't be probed for existence/id (enumeration oracle).
+  // Nullable: rows written before this column existed backfill as NULL.
+  sessionId: text('session_id'),
   finalAmount: integer('final_amount').notNull(),
   status: text('status').notNull().default('confirmed'),
   createdAt: timestamp('created_at').notNull().defaultNow(),

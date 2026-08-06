@@ -17,6 +17,33 @@ function newSid(): string {
   return crypto.randomUUID();
 }
 
+/**
+ * Real client IP from X-Forwarded-For, taking the RIGHTMOST hop.
+ * The app is only reachable through one trusted proxy (shared nginx), which
+ * appends the peer it actually saw. The leftmost entry is whatever the client
+ * sent and is fully attacker-controlled — trusting it lets an attacker forge
+ * any IP to dodge per-IP rate limits. The rightmost is the address nginx
+ * observed, so that's the one we key limits on.
+ * ponytail: assumes exactly one trusted proxy. If a second proxy is ever added
+ * in front, trust the 2nd-from-right instead (count = trusted-proxy depth).
+ */
+export function clientIpFromXff(
+  xff: string | null | undefined,
+  fallback: string = 'unknown'
+): string {
+  if (!xff) return fallback;
+  const hops = xff.split(',').map((h) => h.trim()).filter(Boolean);
+  return hops.length > 0 ? hops[hops.length - 1] : fallback;
+}
+
+/** Serialize the session cookie. `Secure` in prod (HTTPS-only); `HttpOnly`
+ * always — the client no longer reads it (lock ownership comes from the
+ * server-computed `mine` flag), so JS never needs access. */
+export function sessionCookie(sid: string): string {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  return `${SESSION_COOKIE}=${sid}; Path=/; SameSite=Lax; HttpOnly; Max-Age=86400${secure}`;
+}
+
 /** Build context from a raw cookie header. `mintedSid` is set when a new id was generated
  * (the HTTP handler must then Set-Cookie it). */
 export function buildContext(

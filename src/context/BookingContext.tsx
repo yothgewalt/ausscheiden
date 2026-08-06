@@ -20,12 +20,9 @@ import { trpc } from '../lib/trpc';
 type RemoteStatus = 'selecting' | 'pending_payment' | 'booked' | 'closed';
 const TABLE_ID_RE = /^T\d{2}$/;
 
-// Session cookie is set (non-HttpOnly) by the tRPC HTTP handler — see
-// src/server/trpc/context.ts SESSION_COOKIE. Read it to tell my own locks from others'.
-function getMySid(): string | null {
-  if (typeof document === 'undefined') return null;
-  return document.cookie.match(/(?:^|;\s*)ausscheiden_sid=([^;]+)/)?.[1] ?? null;
-}
+// Ownership of a lock is decided SERVER-SIDE now: onLockChange yields a `mine`
+// flag computed against this session's cookie, so the client never reads the
+// (now HttpOnly) session cookie and no foreign session id ever crosses the wire.
 
 interface BookingContextType {
   language: Language;
@@ -67,7 +64,6 @@ interface BookingContextType {
     batch: string;
     phone: string;
     email: string;
-    lineId?: string;
     guestNames?: Record<string, string>;
   }) => Booking;
   startIndividualLock: (buyerData: {
@@ -77,7 +73,6 @@ interface BookingContextType {
     batch: string;
     phone: string;
     email: string;
-    lineId?: string;
   }) => Booking;
   cancelSeatLock: () => void;
   
@@ -133,7 +128,6 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // False until the first tables.list resolves — gates the seat map's first paint
   // so it shows lock colors instead of flashing all-available.
   const [locksReady, setLocksReady] = useState(false);
-  const mySidRef = useRef<string | null>(null);
   const reconciledRef = useRef(false);
   const utils = trpc.useUtils();
 
@@ -177,13 +171,13 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   }, [listQuery.data]);
 
-  // Keep remote locks live. Events carry sessionId; drop my own so I never grey myself out.
+  // Keep remote locks live. Events carry a server-computed `mine` flag (never a
+  // raw sessionId); drop my own so I never grey myself out.
   trpc.tables.onLockChange.useSubscription(undefined, {
     onData(evt) {
-      const mySid = (mySidRef.current ??= getMySid());
       setRemoteLocks((prev) => {
         const next = { ...prev };
-        if (evt.phase === null || evt.sessionId === mySid) delete next[evt.id];
+        if (evt.phase === null || evt.mine) delete next[evt.id];
         else next[evt.id] = evt.phase;
         return next;
       });
@@ -271,7 +265,6 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     batch: string;
     phone: string;
     email: string;
-    lineId?: string;
     guestNames?: Record<string, string>;
   }): Booking => {
     if (!selectedTable || selectedSeats.length === 0) {
@@ -283,7 +276,9 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ? selectedTable.pricePerTable
       : selectedSeats.length * selectedTable.pricePerSeat;
 
-    const bookingId = `BK-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    // Crypto-random ref, not Math.random() (only 9000 values → guessable + collision-
+    // prone). 8 hex chars = 4.3B values; unguessable and effectively collision-free.
+    const bookingId = `BK-2026-${crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     const nowStr = new Date().toLocaleString('sv').replace('T', ' ').substring(0, 16);
     const lockDurationSec = eventDetails.lockTimeoutMinutes * 60;
     const lockExpiresAt = Date.now() + lockDurationSec * 1000;
@@ -304,7 +299,6 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       batch: buyerData.batch,
       phone: buyerData.phone,
       email: buyerData.email,
-      lineId: buyerData.lineId,
       tableId: selectedTable.id,
       tableName: selectedTable.name,
       zone: selectedTable.zone,
@@ -366,7 +360,9 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     email: string;
     lineId?: string;
   }): Booking => {
-    const bookingId = `BK-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    // Crypto-random ref, not Math.random() (only 9000 values → guessable + collision-
+    // prone). 8 hex chars = 4.3B values; unguessable and effectively collision-free.
+    const bookingId = `BK-2026-${crypto.randomUUID().replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     const nowStr = new Date().toLocaleString('sv').replace('T', ' ').substring(0, 16);
     const lockDurationSec = eventDetails.lockTimeoutMinutes * 60;
     const lockExpiresAt = Date.now() + lockDurationSec * 1000;
@@ -381,7 +377,6 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       batch: buyerData.batch,
       phone: buyerData.phone,
       email: buyerData.email,
-      lineId: buyerData.lineId,
       tableId: undefined,
       tableName: undefined,
       zone: undefined,
@@ -499,7 +494,6 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         buyerName: booking.buyerName,
         phone: booking.phone,
         email: booking.email,
-        lineId: booking.lineId,
         major: booking.major,
         batch: booking.batch,
         bookingType: booking.bookingType,

@@ -52,7 +52,6 @@ export interface Booking {
   batch: string;
   phone: string;
   email: string;
-  lineId?: string;
   
   // Table & Seats — optional: an individual ticket carries no table
   tableId?: string;
