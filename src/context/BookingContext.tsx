@@ -501,11 +501,15 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       });
 
       if (!confirmResult.ok) {
-        // Individual pool sold out under this buyer — undo the optimistic confirm.
+        // Confirm rejected server-side — undo the optimistic confirm and surface why.
         const rejected: Booking = { ...updatedBooking, status: 'rejected' };
         setBookings((prev) => prev.map((b) => (b.id === bookingId ? rejected : b)));
         utils.tables.zoneAvailability.invalidate();
-        throw new Error('บัตรเดี่ยวเต็มแล้ว (จำกัด 16 ที่นั่ง) — ไม่สามารถยืนยันการจองได้');
+        throw new Error(
+          confirmResult.reason === 'slip_used'
+            ? 'สลิปนี้ถูกใช้ยืนยันการจองไปแล้ว กรุณาใช้สลิปการโอนใหม่'
+            : 'บัตรเดี่ยวเต็มแล้ว (จำกัด 16 ที่นั่ง) — ไม่สามารถยืนยันการจองได้'
+        );
       }
 
       // Individual confirms fire no lock event, so the subscription-based invalidation

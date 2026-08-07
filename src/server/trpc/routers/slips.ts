@@ -9,7 +9,6 @@ import {
   EXPECTED_RECEIVING_BANK,
 } from '../../rdcw';
 import {
-  claimTransRef,
   mintPaymentToken,
   negCacheGet,
   negCacheSet,
@@ -17,7 +16,7 @@ import {
   quotaCacheRead,
   quotaCacheWrite,
 } from '../../redis';
-import { tables } from '../../db/schema';
+import { tables, bookings } from '../../db/schema';
 import { INDIVIDUAL_PRICE } from '../../../data/mockData';
 
 // Abuse gates for the paid RDCW slip API (~115 lifetime calls). A single abuser
@@ -161,9 +160,16 @@ export const slipsRouter = router({
         };
       }
 
-      // Claim the transRef so the same slip can't confirm twice. Only reached once
-      // everything else passed, so we never burn a valid ref on a rejected slip.
-      if (!(await claimTransRef(data.transRef))) {
+      // Reject only if this slip already backs a PERSISTED booking. Read-only:
+      // unlike the old Redis claim (which marked the transRef used at verify time,
+      // stranding it for 30 days whenever a first attempt failed downstream), a
+      // failed/abandoned attempt writes no row, so the same slip stays usable on
+      // retry. The unique trans_ref index in confirmBooking is the atomic backstop.
+      const [used] = await ctx.db
+        .select({ id: bookings.id })
+        .from(bookings)
+        .where(eq(bookings.transRef, data.transRef));
+      if (used) {
         return {
           success: false as const,
           transRef: data.transRef,

@@ -115,18 +115,6 @@ export async function list(): Promise<Lock[]> {
 }
 
 /**
- * Claim a slip's transRef so the same slip can't confirm two bookings.
- * Returns true if this is the first time we've seen it, false if already used.
- * ponytail: 30-day TTL — long enough to outlive any event; drop the TTL arg for
- * permanent keys if slips must never be reusable across events.
- */
-const TRANSREF_TTL_SEC = 60 * 60 * 24 * 30;
-export async function claimTransRef(transRef: string): Promise<boolean> {
-  const ok = await pub.set(`slip:transRef:${transRef}`, '1', 'EX', TRANSREF_TTL_SEC, 'NX');
-  return ok === 'OK';
-}
-
-/**
  * Payment token — server-minted proof that a slip was verified for a specific
  * (key, sessionId, amount). confirmBooking consumes it so the client can't book
  * something it never paid the right amount for. `key` is the tableId for a table

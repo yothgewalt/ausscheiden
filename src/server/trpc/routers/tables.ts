@@ -190,7 +190,9 @@ export const tablesRouter = router({
     // lock makes count→insert one critical section; it auto-releases on commit or
     // rollback. onConflictDoNothing(ref) + the unique ref index is the final
     // backstop against any duplicate row.
-    const result = await ctx.db.transaction(async (tx) => {
+    let result: { ok: true; id: string | null } | { ok: false; reason: 'sold_out' | 'slip_used' };
+    try {
+      result = await ctx.db.transaction(async (tx) => {
       if (input.bookingType === 'individual') {
         // ponytail: one fixed key for the sole capped pool. Per-pool keys if a
         // second capped tier is ever added.
@@ -199,6 +201,16 @@ export const tablesRouter = router({
         const count = await tx.$count(bookings, eq(bookings.bookingType, 'individual'));
         if (count >= cap) return { ok: false as const, reason: 'sold_out' as const };
       }
+
+      // Slip reuse guard. The same-session retry is already short-circuited by the
+      // idempotent-by-ref check above; this catches two DIFFERENT sessions confirming
+      // the identical slip. Read here for a clean reason; the unique trans_ref index
+      // is the atomic backstop if two confirms still race past this read.
+      const [dupSlip] = await tx
+        .select({ id: bookings.id })
+        .from(bookings)
+        .where(eq(bookings.transRef, token.transRef));
+      if (dupSlip) return { ok: false as const, reason: 'slip_used' as const };
 
       const [row] = await tx
         .insert(bookings)
@@ -213,6 +225,7 @@ export const tablesRouter = router({
           bookingType: input.bookingType,
           sessionId: ctx.sessionId,
           finalAmount: token.amount,
+          transRef: token.transRef,
         })
         .onConflictDoNothing({ target: bookings.ref })
         .returning({ id: bookings.id });
@@ -227,7 +240,16 @@ export const tablesRouter = router({
       }
 
       return { ok: true as const, id: row?.id ?? null };
-    });
+      });
+    } catch (err) {
+      // The unique trans_ref index is the atomic backstop: if two sessions race
+      // past the read-check above, one insert throws 23505 (unique_violation).
+      // Map it to the same clean reason instead of a raw 500.
+      if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === '23505') {
+        return { ok: false as const, reason: 'slip_used' as const };
+      }
+      throw err;
+    }
 
     // Drop the Redis lock only AFTER the DB commit. It's Redis (not part of the
     // Postgres tx): a table that stays locked a moment longer is harmless, a lock

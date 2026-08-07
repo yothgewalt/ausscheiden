@@ -32,6 +32,10 @@ export const bookings = pgTable('bookings', {
   // MinIO object key for the uploaded slip: <tableId|'individual'>/<ref>/slip.<ext>.
   // Nullable: archival is best-effort (a paid booking is never lost if upload fails).
   slipPath: text('slip_path'),
+  // The slip's RDCW transRef. Unique so one slip backs at most one booking — the
+  // atomic dedup for reuse (a persisted row, not a pre-confirm Redis claim, is the
+  // source of truth). Nullable: prod rows predate this column.
+  transRef: text('trans_ref').unique(),
   status: text('status').notNull().default('confirmed'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
