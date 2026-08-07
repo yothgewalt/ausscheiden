@@ -45,6 +45,9 @@ export const CongratsModal: React.FC<CongratsModalProps> = ({
             <p className="text-sm text-muted leading-relaxed max-w-xs">
               ขอบคุณสำหรับการสำรองที่นั่ง เราได้รับสลิปการชำระเงินของท่านเรียบร้อยแล้ว
             </p>
+            <p className="text-sm text-muted leading-relaxed max-w-xs">
+              อีเมลยืนยันการจองจะถูกส่งไปยังท่านภายใน 24 ชั่วโมง
+            </p>
           </div>
 
           {/* Read-only summary — whitespace + hairline, not a card (luma taste). */}
