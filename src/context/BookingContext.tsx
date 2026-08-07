@@ -116,8 +116,33 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [selectedSeats, setSelectedSeats] = useState<Seat[]>([]);
   
-  const [activeLockBooking, setActiveLockBooking] = useState<Booking | null>(null);
-  const [lockTimerSeconds, setLockTimerSeconds] = useState<number>(0);
+  // Survive a page refresh mid-payment: the booking lives only in React state,
+  // but the server's pending_payment lock is keyed by the (cookie) session which
+  // outlives F5. Stash the booking so the payment modal can reopen. sessionStorage,
+  // not localStorage: a closed tab's lock TTLs out server-side, so we must NOT
+  // resurrect it in a new tab (would fail at confirm).
+  const LOCK_STORAGE_KEY = 'ausscheiden:activeLockBooking';
+  const [activeLockBooking, setActiveLockBooking] = useState<Booking | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = sessionStorage.getItem(LOCK_STORAGE_KEY);
+      if (!raw) return null;
+      const b = JSON.parse(raw) as Booking;
+      // Drop a stale stash whose lock window already elapsed.
+      if (!b.lockExpiresAt || b.lockExpiresAt <= Date.now()) {
+        sessionStorage.removeItem(LOCK_STORAGE_KEY);
+        return null;
+      }
+      return b;
+    } catch {
+      return null;
+    }
+  });
+  const [lockTimerSeconds, setLockTimerSeconds] = useState<number>(() =>
+    activeLockBooking?.lockExpiresAt
+      ? Math.max(0, Math.round((activeLockBooking.lockExpiresAt - Date.now()) / 1000))
+      : 0
+  );
   const [activeTicketBooking, setActiveTicketBooking] = useState<Booking | null>(null);
   
   const [activeZoneFilter, setActiveZoneFilter] = useState<ZoneType | 'all'>('all');
@@ -188,6 +213,17 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       utils.tables.zoneAvailability.invalidate();
     },
   });
+
+  // Mirror the active lock to sessionStorage so a mid-payment refresh can reopen
+  // the modal. One effect covers every clear path (cancel, confirm, expiry).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (activeLockBooking && activeLockBooking.status === 'pending_payment') {
+      sessionStorage.setItem(LOCK_STORAGE_KEY, JSON.stringify(activeLockBooking));
+    } else {
+      sessionStorage.removeItem(LOCK_STORAGE_KEY);
+    }
+  }, [activeLockBooking]);
 
   // Lock timer effect - optimized interval loop
   useEffect(() => {
