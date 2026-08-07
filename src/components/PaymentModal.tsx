@@ -133,18 +133,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </p>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="flex items-center gap-1.5 bg-accent/10 px-2.5 py-1.5 rounded-lg text-accent font-mono font-bold text-sm">
-              <Clock className="w-4 h-4" />
-              <span>{formatTimer(lockTimerSeconds)}</span>
-            </div>
-            <button
-              onClick={cancelSeatLock}
-              aria-label="ยกเลิก"
-              className="p-1.5 text-muted hover:text-primary rounded-lg btn-secondary transition-all cursor-pointer"
-            >
-              <X className="w-4 h-4" />
-            </button>
+          <div className="flex items-center gap-1.5 bg-accent/10 px-2.5 py-1.5 rounded-lg text-accent font-mono font-bold text-sm shrink-0">
+            <Clock className="w-4 h-4" />
+            <span>{formatTimer(lockTimerSeconds)}</span>
           </div>
         </div>
 
@@ -280,6 +271,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                 <span>ยืนยันการชำระเงิน</span>
               </>
             )}
+          </button>
+
+          {/* Cancel — frees the seat lock. Neutral secondary; accent stays on the timer. */}
+          <button
+            type="button"
+            disabled={isVerifying}
+            onClick={cancelSeatLock}
+            className="w-full py-3 px-6 rounded-lg bg-surface btn-secondary text-primary font-bold text-sm transition-colors hover:bg-primary/3 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            ยกเลิกการจอง
           </button>
 
           {/* Non-refundable note — read-only prose, footnote not a card (luma taste) */}

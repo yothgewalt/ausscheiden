@@ -181,17 +181,22 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setRemoteLocks(next);
     setLocksReady(true);
 
-    // Once per mount: a fresh load has no activeLockBooking, so any 'selecting'
-    // lock the server still attributes to me is an orphan left by a closed tab
-    // (close never releases — see cancelSeatLock/releaseSelection). Free it so the
-    // table doesn't sit locked for the full TTL and re-clicking can't refresh it.
-    // NOT pending_payment: that's a real in-flight payment.
+    // Once per mount, free my own orphaned locks left by a closed tab (close never
+    // releases — see cancelSeatLock/releaseSelection):
+    //   • 'selecting'       — always an orphan (a promoted booking is pending_payment).
+    //   • 'pending_payment' — orphan ONLY if no rehydrated activeLockBooking claims
+    //     this table. A same-tab refresh restores activeLockBooking from sessionStorage
+    //     (→ payment modal reopens, spared here); a closed tab reopened in a NEW tab has
+    //     empty sessionStorage, so the lock is unrecoverable — free it or the table sits
+    //     invisibly locked (excluded from remoteLocks as "mine", with no modal to drive it).
     if (!reconciledRef.current) {
       reconciledRef.current = true;
       for (const t of listQuery.data) {
-        if (t.lockedByMe && t.status === 'selecting') {
-          releaseLock.mutate({ tableId: t.id });
-        }
+        if (!t.lockedByMe) continue;
+        const orphaned =
+          t.status === 'selecting' ||
+          (t.status === 'pending_payment' && activeLockBooking?.tableId !== t.id);
+        if (orphaned) releaseLock.mutate({ tableId: t.id });
       }
     }
   }, [listQuery.data]);
