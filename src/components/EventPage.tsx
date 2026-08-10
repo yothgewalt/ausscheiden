@@ -56,7 +56,7 @@ const hosts = [
 
 // ── event agenda, moved verbatim from the former EventInfoSection ──
 const schedule = [
-  { time: '14.00 น.', titleTh: 'The Last Lecture โดย รศ.ดร. อนิราช มิ่งขวัญ และ ผศ. นิมิต ศรีคำทา', titleEn: 'The Last Lecture by Assoc Prof. Dr. Anirach Mingkwan' },
+  { time: '14.00 น.', titleTh: 'One Day of Light โดย รศ.ดร. อนิราช มิ่งขวัญ', titleEn: 'One Day of Light by Assoc Prof. Dr. Anirach Mingkwan' },
   { time: '16.00 น.', titleTh: 'ลงทะเบียนเข้าร่วมงานมุทิตาจิต ครบรอบ 30 ปี ภาควิชาฯ', titleEn: 'Registration & Welcome for 30th Anniversary Mutita Ceremony' },
   { time: '16.15 น.', titleTh: 'กิจกรรมกระชับความสัมพันธ์ระหว่างรุ่นพี่และรุ่นน้อง', titleEn: 'Alumni & Student Relationship Activities' },
   { time: '17.00 น.', titleTh: 'พิธีเปิดงาน', titleEn: 'Opening Ceremony' },
@@ -258,7 +258,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                         </span>
                         {/* availability badge — grey skeleton until ready, then green "ยังมีที่ว่าง" / red "เต็ม" */}
                         {!zonesReady ? (
-                          <span className="shrink-0 w-14 h-5 rounded-full bg-[rgba(20,20,20,0.08)]" />
+                          <span className="shrink-0 w-14 h-5 rounded-full bg-hairline" />
                         ) : full ? (
                           <span className="shrink-0 px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 text-[11px] font-medium">
                             เต็ม
@@ -292,7 +292,7 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
           {eventDetails.registerFormUrl && (
             <div className="rounded-lg bg-surface card-shadow overflow-hidden">
               <div className="px-5 py-2 border-b-[0.5px] border-b-hairline">
-                <span className="text-base font-bold text-primary">ลงทะเบียนงาน The Last Lecture</span>
+                <span className="text-base font-bold text-primary">ลงทะเบียนงาน One Day of Light</span>
               </div>
               <div className="p-5 space-y-4">
                 <p className="text-sm text-muted">
