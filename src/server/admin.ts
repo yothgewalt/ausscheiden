@@ -72,6 +72,26 @@ export function clearAdminCookie(): string {
   return `${ADMIN_COOKIE}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0${secure}`;
 }
 
+/**
+ * Build the `filename` for a slip download's Content-Disposition header.
+ *
+ * `ref` is client-supplied (tables.confirmBooking takes any non-empty string)
+ * and the slip bytes are attacker-controlled too — parseSlip checks the
+ * data-URL mime label, never the decoded content. Interpolated raw, a `"` in
+ * `ref` closes the quoted filename and lets a buyer append `filename*=`, which
+ * RFC 6266 prefers, choosing the exact name AND extension an organiser saves
+ * under. That turns "download the slip" into "save invoice.hta".
+ *
+ * Reduced to `[A-Za-z0-9._-]`, nothing can leave the quotes. Lives here rather
+ * than inline in the route so it is named, reviewable, and covered below.
+ */
+export function slipFilename(ref: string, objectKey: string): string {
+  const safeRef = ref.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64) || 'slip';
+  const dot = objectKey.lastIndexOf('.');
+  const ext = dot === -1 ? '' : objectKey.slice(dot + 1).replace(/[^A-Za-z0-9]/g, '');
+  return `${safeRef}.${ext || 'bin'}`;
+}
+
 // ── self-check: bun src/server/admin.ts ────────────────────────────────────
 function _demo() {
   const saved = process.env.ADMIN_TOKEN;
@@ -100,6 +120,25 @@ function _demo() {
   console.assert(cookie.includes('HttpOnly'), 'cookie is HttpOnly');
   console.assert(cookie.includes('Max-Age=43200'), 'cookie lives 12h');
   console.assert(clearAdminCookie().includes('Max-Age=0'), 'logout expires the cookie');
+
+  // slipFilename: nothing a buyer puts in `ref` may escape the quoted filename.
+  const esc = (ref: string) => slipFilename(ref, 'T01/x/slip.png');
+  console.assert(esc('BK-2026-ABCD1234') === 'BK-2026-ABCD1234.png', 'benign ref passes through');
+  for (const [payload, what] of [
+    ['x"; filename*=UTF-8\'\'invoice.hta; z="', 'quote-break + RFC 6266 override'],
+    ['a"onload="alert(1)', 'quote break'],
+    ['a\r\nX-Injected: 1', 'CRLF'],
+    ['../../etc/passwd', 'traversal characters'],
+  ] as const) {
+    const out = esc(payload);
+    console.assert(!/["\r\n;]/.test(out), `${what}: no quote/CRLF/semicolon survives`);
+  }
+  console.assert(esc('A'.repeat(500)).length <= 68, 'overlong ref is truncated');
+  // Extension comes from the object key, which is minted from a buyer-declared
+  // mime — svg+xml must not smuggle punctuation into the header either.
+  console.assert(slipFilename('r', 'a/b/slip.svg+xml') === 'r.svgxml', 'svg+xml ext stripped');
+  console.assert(slipFilename('r', 'a/b/slip') === 'r.bin', 'missing extension falls back');
+  console.assert(slipFilename('!!!', 'a/b/slip.png') === '___.png', 'all-special ref survives as underscores');
 
   if (saved === undefined) delete process.env.ADMIN_TOKEN;
   else process.env.ADMIN_TOKEN = saved;

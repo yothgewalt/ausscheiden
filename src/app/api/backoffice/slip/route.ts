@@ -2,7 +2,7 @@ import type { NextRequest } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { db } from '../../../../server/db';
 import { bookings } from '../../../../server/db/schema';
-import { isAdminRequest } from '../../../../server/admin';
+import { isAdminRequest, slipFilename } from '../../../../server/admin';
 import { readSlip } from '../../../../server/storage';
 
 /**
@@ -35,11 +35,14 @@ export async function GET(req: NextRequest) {
   const slip = await readSlip(row.slipPath);
   if (!slip) return Response.json({ error: 'slip unavailable' }, { status: 404 });
 
-  const ext = row.slipPath.slice(row.slipPath.lastIndexOf('.') + 1);
   return new Response(new Uint8Array(slip.bytes), {
     headers: {
       'Content-Type': slip.mime,
-      'Content-Disposition': `attachment; filename="${row.ref}.${ext}"`,
+      // slipFilename() sanitises the client-supplied `ref` — see its contract.
+      'Content-Disposition': `attachment; filename="${slipFilename(row.ref, row.slipPath)}"`,
+      // The mime label is buyer-declared, so stop the browser from sniffing its
+      // way to something scriptable.
+      'X-Content-Type-Options': 'nosniff',
       // Buyer payment slips: never let a proxy or the browser keep a copy.
       'Cache-Control': 'no-store',
     },

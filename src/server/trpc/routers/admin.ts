@@ -40,17 +40,41 @@ export const adminRouter = router({
    * checklist page — no pagination, no separate "latest buyers" endpoint.
    */
   bookings: adminProcedure.query(async ({ ctx }) => {
+    // Columns listed one by one rather than spreading the row: `sessionId` is a
+    // bearer capability — replaying it lets you act as that buyer, including the
+    // idempotent re-confirm path that is scoped by exactly this value — and
+    // nothing in the UI needs it. The rest of the codebase already refuses to
+    // emit it (tables.list reduces it to `lockedByMe`, onLockChange to `mine`,
+    // otel.ts hashes it), so shipping it to a browser here would be the one
+    // place that breaks that rule. A `select()` spread would silently re-add it
+    // the day a new secret column lands.
     const rows = await ctx.db
-      .select({ b: bookings, zone: tables.zone })
+      .select({
+        id: bookings.id,
+        ref: bookings.ref,
+        tableId: bookings.tableId,
+        buyerName: bookings.buyerName,
+        phone: bookings.phone,
+        email: bookings.email,
+        major: bookings.major,
+        batch: bookings.batch,
+        bookingType: bookings.bookingType,
+        finalAmount: bookings.finalAmount,
+        slipPath: bookings.slipPath,
+        transRef: bookings.transRef,
+        status: bookings.status,
+        emailSentAt: bookings.emailSentAt,
+        createdAt: bookings.createdAt,
+        zone: tables.zone,
+      })
       .from(bookings)
       .leftJoin(tables, eq(bookings.tableId, tables.id))
       .orderBy(desc(bookings.createdAt));
 
-    return rows.map(({ b, zone }) => ({
-      ...b,
-      zone,
+    return rows.map((r) => ({
+      ...r,
       // Tables are "T01".."T70"; the humans running the event say "โต๊ะ 7".
-      tableNumber: b.tableId ? Number(b.tableId.slice(1)) : null,
+      tableNumber: r.tableId ? Number(r.tableId.slice(1)) : null,
     }));
   }),
 
