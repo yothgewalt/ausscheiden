@@ -547,9 +547,12 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setBookings((prev) => prev.map((b) => (b.id === bookingId ? rejected : b)));
         utils.tables.zoneAvailability.invalidate();
         throw new Error(
-          confirmResult.reason === 'slip_used'
-            ? 'สลิปนี้ถูกใช้ยืนยันการจองไปแล้ว กรุณาใช้สลิปการโอนใหม่'
-            : 'บัตรเดี่ยวเต็มแล้ว (จำกัด 16 ที่นั่ง) — ไม่สามารถยืนยันการจองได้'
+          {
+            slip_used: 'สลิปนี้ถูกใช้ยืนยันการจองไปแล้ว กรุณาใช้สลิปการโอนใหม่',
+            sold_out: 'บัตรเดี่ยวเต็มแล้ว (จำกัด 16 ที่นั่ง) — ไม่สามารถยืนยันการจองได้',
+            ref_conflict:
+              'รหัสจองนี้ถูกใช้ไปแล้ว กรุณาติดต่อผู้ดูแลระบบพร้อมแจ้งรหัสจองและสลิปการโอน',
+          }[confirmResult.reason]
         );
       }
 

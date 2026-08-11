@@ -154,8 +154,15 @@ export const tablesRouter = router({
     const mine = already.find((b) => b.sessionId === ctx.sessionId);
     if (mine) return { ok: true as const, id: mine.id };
 
-    const token = await locks.consumePaymentToken(tokenKey, ctx.sessionId);
-    if (!token) {
+    // PEEK first, consume last. consumePaymentToken is single-use and
+    // irreversible, so consuming here — before the two checks below — meant a
+    // bookingType or lock mismatch permanently destroyed a token the buyer had
+    // ALREADY PAID for, leaving them to re-verify behind a 5-per-10-min gate on a
+    // ~115-call lifetime quota. Peek → validate → consume costs one extra GET and
+    // keeps the atomic consume as the concurrency guard, since it still lands
+    // before any write.
+    const peeked = await locks.readPaymentToken(tokenKey);
+    if (!peeked || peeked.sessionId !== ctx.sessionId) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'ยังไม่ได้ยืนยันการชำระเงิน หรือเซสชันไม่ตรงกัน กรุณาชำระเงินและอัปโหลดสลิปก่อน',
@@ -166,7 +173,7 @@ export const tablesRouter = router({
     // at confirm time. Without this, an `individual` token (799, minted at
     // individual:<sid>) could confirm as `whole_table` with no tableId, storing a
     // row that skips the individual-pool cap check below and oversells the pool.
-    if (token.bookingType !== input.bookingType) {
+    if (peeked.bookingType !== input.bookingType) {
       throw new TRPCError({
         code: 'FORBIDDEN',
         message: 'ประเภทการจองไม่ตรงกับการชำระเงินที่ยืนยันไว้ กรุณาเริ่มใหม่',
@@ -183,6 +190,17 @@ export const tablesRouter = router({
       }
     }
 
+    // Every check passed — now burn it. Persist the CONSUMED token's values, not
+    // the peeked ones: if the buyer verified a second slip in the gap, the consume
+    // returns that newer token and its transRef/amount are the ones that count.
+    const token = await locks.consumePaymentToken(tokenKey, ctx.sessionId);
+    if (!token) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'ยังไม่ได้ยืนยันการชำระเงิน หรือเซสชันไม่ตรงกัน กรุณาชำระเงินและอัปโหลดสลิปก่อน',
+      });
+    }
+
     // Atomic booking. The individual-tier cap check + insert MUST be serialized
     // against concurrent individual confirms — otherwise two callers each read
     // count < cap and both insert, overselling past the cap (the count and the
@@ -190,7 +208,9 @@ export const tablesRouter = router({
     // lock makes count→insert one critical section; it auto-releases on commit or
     // rollback. onConflictDoNothing(ref) + the unique ref index is the final
     // backstop against any duplicate row.
-    let result: { ok: true; id: string | null } | { ok: false; reason: 'sold_out' | 'slip_used' };
+    let result:
+      | { ok: true; id: string }
+      | { ok: false; reason: 'sold_out' | 'slip_used' | 'ref_conflict' };
     try {
       result = await ctx.db.transaction(async (tx) => {
       if (input.bookingType === 'individual') {
@@ -230,6 +250,12 @@ export const tablesRouter = router({
         .onConflictDoNothing({ target: bookings.ref })
         .returning({ id: bookings.id });
 
+      // No row ⇒ the conflict swallowed the insert, and the existing row is NOT
+      // ours (a same-session retry already returned early above). Reporting
+      // ok:true here took the payment, wrote nothing, and then stamped slip_path
+      // onto the other session's booking. Fail loudly instead.
+      if (!row) return { ok: false as const, reason: 'ref_conflict' as const };
+
       // Table-bound booking: mark it booked. Scope the update to an available row
       // so we never flip a table someone else already booked.
       if (input.tableId) {
@@ -239,7 +265,7 @@ export const tablesRouter = router({
           .where(and(eq(tables.id, input.tableId), eq(tables.status, 'available')));
       }
 
-      return { ok: true as const, id: row?.id ?? null };
+      return { ok: true as const, id: row.id };
       });
     } catch (err) {
       // The unique trans_ref index is the atomic backstop: if two sessions race
@@ -268,11 +294,15 @@ export const tablesRouter = router({
       const prefix = input.tableId ?? 'individual';
       const key = await uploadSlip(prefix, input.ref, input.slipImage);
       if (key) {
+        // Key on the id we just inserted, not the client-supplied ref — a ref we
+        // don't own can never be the target of this write.
         await ctx.db
           .update(bookings)
           .set({ slipPath: key })
-          .where(eq(bookings.ref, input.ref));
+          .where(eq(bookings.id, result.id));
       }
+    } else {
+      console.warn(`[confirmBooking] reject ${result.reason} ref=${input.ref} key=${tokenKey}`);
     }
 
     return result;

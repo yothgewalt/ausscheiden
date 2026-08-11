@@ -8,13 +8,17 @@ import {
   hashSlipImage,
   EXPECTED_RECEIVING_BANK,
 } from '../../rdcw';
+import type { RdcwSlipData, RdcwQuota } from '../../rdcw';
 import {
   mintPaymentToken,
   negCacheGet,
   negCacheSet,
+  posCacheGet,
+  posCacheSet,
   rateLimitHit,
   quotaCacheRead,
   quotaCacheWrite,
+  readLock,
 } from '../../redis';
 import { tables, bookings } from '../../db/schema';
 import { INDIVIDUAL_PRICE } from '../../../data/mockData';
@@ -27,6 +31,20 @@ const IP_LIMIT = 5;
 const SESSION_LIMIT = 5;
 const RL_WINDOW_SEC = 600; // 10 min
 const QUOTA_RESERVE = 15; // keep this many calls for admin/edge cases
+
+/**
+ * Every rejection returns through here so the reason is logged exactly once.
+ * The app used to log NOTHING on this path — a proxy 504 stranded a buyer and
+ * left no server-side trace at all. Keep the `success: false` literal: the
+ * client narrows the union on it (BookingContext reads `res.failureReason`).
+ */
+function fail(
+  failureReason: string,
+  extra?: { transRef?: string; amount?: number }
+): { success: false; failureReason: string; transRef?: string; amount?: number } {
+  console.warn(`[slips.verify] reject: ${failureReason}`);
+  return { success: false, failureReason, ...extra };
+}
 
 export const slipsRouter = router({
   // Verify an uploaded slip against RDCW: valid slip + correct payee + bank + the
@@ -53,19 +71,25 @@ export const slipsRouter = router({
       const hash = hashSlipImage(input.slipImage);
       const cached = await negCacheGet(hash);
       if (cached) {
-        return { success: false as const, failureReason: cached };
+        return fail(cached);
       }
 
-      // ── Gate 2: rate limit (novel images only). Per-IP AND per-session, so
-      // dropping the session cookie doesn't reset the IP budget and vice-versa.
-      const ipOk = await rateLimitHit('ip', ctx.ip, IP_LIMIT, RL_WINDOW_SEC);
-      const sidOk = await rateLimitHit('sid', ctx.sessionId, SESSION_LIMIT, RL_WINDOW_SEC);
-      if (!ipOk || !sidOk) {
-        return {
-          success: false as const,
-          failureReason:
-            'คุณส่งสลิปบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง (หรือติดต่อผู้ดูแลระบบ)',
-        };
+      // ── Gate 1b: positive cache. A verify that succeeded upstream but died
+      // downstream (proxy 504, dropped connection, a confirm that failed) used to
+      // make the buyer's retry spend a SECOND of the ~115 lifetime RDCW calls —
+      // and after 5 tries lock them out for 10 minutes. Re-use the transaction we
+      // already read from these exact bytes; every gate below still re-runs.
+      const memo = await posCacheGet(hash);
+
+      // ── Gate 2: rate limit. Only novel images spend budget — a cache hit costs
+      // us nothing, so it must not cost the buyer a retry slot. Per-IP AND
+      // per-session, so dropping the session cookie doesn't reset the IP budget.
+      if (!memo) {
+        const ipOk = await rateLimitHit('ip', ctx.ip, IP_LIMIT, RL_WINDOW_SEC);
+        const sidOk = await rateLimitHit('sid', ctx.sessionId, SESSION_LIMIT, RL_WINDOW_SEC);
+        if (!ipOk || !sidOk) {
+          return fail('คุณส่งสลิปบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง (หรือติดต่อผู้ดูแลระบบ)');
+        }
       }
 
       // Server-authoritative expected amount. Table bookings read pricePerTable
@@ -78,52 +102,56 @@ export const slipsRouter = router({
         tokenKey = `individual:${ctx.sessionId}`;
       } else {
         if (!input.tableId) {
-          return { success: false as const, failureReason: 'ไม่พบโต๊ะที่เลือก กรุณาลองใหม่' };
+          return fail('ไม่พบโต๊ะที่เลือก กรุณาลองใหม่');
         }
         const [row] = await ctx.db.select().from(tables).where(eq(tables.id, input.tableId));
         if (!row) {
-          return { success: false as const, failureReason: 'ไม่พบโต๊ะที่เลือก กรุณาลองใหม่' };
+          return fail('ไม่พบโต๊ะที่เลือก กรุณาลองใหม่');
+        }
+        // The caller must actually HOLD this table. mintPaymentToken is a bare SET
+        // keyed by tableId, so without this a second session could verify against
+        // someone else's table and overwrite the token the rightful buyer paid
+        // for — who then hits FORBIDDEN at confirm with money already sent. Also
+        // stops an RDCW call being spent on a table the caller could never book
+        // (confirmBooking rejects it anyway, just later and more expensively).
+        const lock = await readLock(input.tableId);
+        if (!lock || lock.sessionId !== ctx.sessionId) {
+          return fail('สิทธิ์การจองโต๊ะนี้หมดอายุแล้ว กรุณาเลือกโต๊ะและจองใหม่อีกครั้ง');
         }
         expectedAmount = row.pricePerTable;
         tokenKey = input.tableId;
       }
 
-      // ── Gate 3: global quota breaker. Refuse to call when near the ceiling,
-      // reserving headroom for admin manual review (which already exists). Uses
-      // the last quota RDCW reported (persisted below). Cold start ⇒ allow.
-      const q = await quotaCacheRead();
-      if (q && q.usage >= q.limit - QUOTA_RESERVE) {
-        return {
-          success: false as const,
-          failureReason: 'ระบบไม่สามารถรับการจองได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ',
-        };
-      }
+      let data: RdcwSlipData;
+      let quota: RdcwQuota | undefined;
+      if (memo) {
+        data = memo;
+      } else {
+        // ── Gate 3: global quota breaker. Refuse to call when near the ceiling,
+        // reserving headroom for admin manual review (which already exists). Uses
+        // the last quota RDCW reported (persisted below). Cold start ⇒ allow.
+        const q = await quotaCacheRead();
+        if (q && q.usage >= q.limit - QUOTA_RESERVE) {
+          return fail('ระบบไม่สามารถรับการจองได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ');
+        }
 
-      // All gates passed — spend one RDCW call.
-      let data, quota;
-      try {
-        ({ data, quota } = await verifySlipImage(input.slipImage));
-      } catch (err) {
-        // Do NOT negative-cache the throw path: it bundles intrinsic (not-a-slip)
-        // with transient (network / HTTP 5xx / creds) errors, and caching a
-        // transient failure would reject a good re-upload for 24h. The rate limit
-        // already caps junk-image spam.
-        return {
-          success: false as const,
-          failureReason: err instanceof Error ? err.message : 'ตรวจสอบสลิปไม่สำเร็จ',
-        };
-      }
+        // All gates passed — spend one RDCW call.
+        try {
+          ({ data, quota } = await verifySlipImage(input.slipImage));
+        } catch (err) {
+          // Do NOT negative-cache the throw path: it bundles intrinsic (not-a-slip)
+          // with transient (network / timeout / HTTP 5xx / creds) errors, and caching a
+          // transient failure would reject a good re-upload for 24h. The rate limit
+          // already caps junk-image spam.
+          return fail(err instanceof Error ? err.message : 'ตรวจสอบสลิปไม่สำเร็จ');
+        }
 
-      // Persist the freshest quota so the breaker above works across restarts.
-      if (quota) await quotaCacheWrite(quota.usage, quota.limit);
-
-      // Post-call quota gate — even on a cold start (no cached quota), don't
-      // reserve if the account is already exhausted after this call.
-      if (quota && quota.usage >= quota.limit - QUOTA_RESERVE) {
-        return {
-          success: false as const,
-          failureReason: 'ระบบไม่สามารถรับการจองได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ',
-        };
+        // Persist the freshest quota so the breaker above works across restarts.
+        if (quota) await quotaCacheWrite(quota.usage, quota.limit);
+        // NOTE: no post-call quota gate. Once the call is spent and the slip is
+        // valid, refusing on quota tells a buyer who has already transferred money
+        // to "contact an admin". The pre-call gate above is what protects the
+        // ceiling; rejecting here only ever punishes the person who paid.
       }
 
       // Intrinsic checks below are a pure function of the image content, so a
@@ -131,13 +159,13 @@ export const slipsRouter = router({
       if (!receiverMatches(data.receiver?.displayName ?? data.receiver?.name)) {
         const reason = 'บัญชีผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี';
         await negCacheSet(hash, reason);
-        return { success: false as const, failureReason: reason };
+        return fail(reason);
       }
 
       if (data.receivingBank && data.receivingBank !== EXPECTED_RECEIVING_BANK) {
         const reason = 'ธนาคารผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี';
         await negCacheSet(hash, reason);
-        return { success: false as const, failureReason: reason };
+        return fail(reason);
       }
 
       // PromptPay proxy check — only rejects on a definite mismatch. Absent or fully
@@ -146,18 +174,21 @@ export const slipsRouter = router({
       if (proxyMatches(data.receiver?.proxy?.value) === false) {
         const reason = 'พร้อมเพย์ผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี';
         await negCacheSet(hash, reason);
-        return { success: false as const, failureReason: reason };
+        return fail(reason);
       }
+
+      // The slip is a real transfer to the right payee. Memoise it BEFORE the
+      // amount/reuse gates so a retry — or a re-upload against the correct table —
+      // is free. Those gates depend on what's being bought, not on the image.
+      if (!memo) await posCacheSet(hash, data);
 
       // Amount mismatch is NOT cached: it depends on which table/ticket is being
       // paid for, not the image — the same slip may be the right amount elsewhere.
       if (data.amount !== expectedAmount) {
-        return {
-          success: false as const,
-          transRef: data.transRef,
-          amount: data.amount,
-          failureReason: `ยอดเงินโอน (${data.amount.toLocaleString()} บาท) ไม่ตรงกับยอดที่ต้องชำระ (${expectedAmount.toLocaleString()} บาท)`,
-        };
+        return fail(
+          `ยอดเงินโอน (${data.amount.toLocaleString()} บาท) ไม่ตรงกับยอดที่ต้องชำระ (${expectedAmount.toLocaleString()} บาท)`,
+          { transRef: data.transRef, amount: data.amount }
+        );
       }
 
       // Reject only if this slip already backs a PERSISTED booking. Read-only:
@@ -170,11 +201,9 @@ export const slipsRouter = router({
         .from(bookings)
         .where(eq(bookings.transRef, data.transRef));
       if (used) {
-        return {
-          success: false as const,
+        return fail('สลิปนี้ถูกใช้ยืนยันการชำระเงินไปแล้ว กรุณาใช้สลิปการโอนใหม่', {
           transRef: data.transRef,
-          failureReason: 'สลิปนี้ถูกใช้ยืนยันการชำระเงินไปแล้ว กรุณาใช้สลิปการโอนใหม่',
-        };
+        });
       }
 
       // Mint the payment token confirmBooking will consume. Bound to this session
@@ -188,6 +217,9 @@ export const slipsRouter = router({
         bookingType: input.bookingType,
       });
 
+      console.info(
+        `[slips.verify] ok: transRef=${data.transRef} key=${tokenKey} amount=${expectedAmount}${memo ? ' (cached, no API call)' : ''}`
+      );
       return {
         success: true as const,
         transRef: data.transRef,

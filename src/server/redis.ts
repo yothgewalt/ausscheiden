@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import type { RdcwSlipData } from './rdcw';
 
 export type LockPhase = 'selecting' | 'pending_payment';
 export interface Lock {
@@ -139,6 +140,18 @@ export async function mintPaymentToken(tok: PaymentToken): Promise<void> {
 }
 
 /**
+ * Non-destructive peek at the token for `key`. Validate with THIS, then consume:
+ * consumePaymentToken destroys a single-use token the buyer already paid for, so
+ * rejecting *after* consuming strands them behind a fresh RDCW call (capped at 5
+ * per 10 min). Peek → validate → consume keeps the atomic consume as the
+ * single-use guard, so concurrent confirms are still mutually exclusive.
+ */
+export async function readPaymentToken(key: string): Promise<PaymentToken | null> {
+  const raw = await pub.get(payKey(key));
+  return raw ? (JSON.parse(raw) as PaymentToken) : null;
+}
+
+/**
  * Read the token for `key`, delete it, and return it — but only if it belongs
  * to `sessionId` (otherwise null, token left for the rightful owner).
  *
@@ -190,6 +203,22 @@ export async function negCacheGet(hash: string): Promise<string | null> {
 }
 export async function negCacheSet(hash: string, reason: string): Promise<void> {
   await pub.set(`slip:negcache:${hash}`, reason, 'EX', NEGCACHE_TTL_SEC);
+}
+
+// Positive cache: the transaction RDCW already read out of these exact bytes.
+// A verify that succeeded upstream but died downstream (proxy 504, dropped
+// connection, a confirm that failed) previously made the buyer's retry spend a
+// SECOND of the ~115 lifetime API calls and a second slot of their 5-per-10-min
+// budget. Cached here, the retry costs neither. Storing the raw slip data (not a
+// verdict) keeps every gate honest: amount, payee, bank, proxy and the
+// trans_ref-already-used lookup all re-run on a hit.
+const POSCACHE_TTL_SEC = 900; // 15 min — outlives a retry loop, not a sale
+export async function posCacheGet(hash: string): Promise<RdcwSlipData | null> {
+  const raw = await pub.get(`slip:poscache:${hash}`);
+  return raw ? (JSON.parse(raw) as RdcwSlipData) : null;
+}
+export async function posCacheSet(hash: string, data: RdcwSlipData): Promise<void> {
+  await pub.set(`slip:poscache:${hash}`, JSON.stringify(data), 'EX', POSCACHE_TTL_SEC);
 }
 
 /**
@@ -272,6 +301,13 @@ async function _demo() {
   // payment-token mint/consume: single-use, bound to the verified slip.
   const tok = { transRef: 'TR-demo', key: t, sessionId: 'sessionA', amount: 5999, bookingType: 'whole_table' };
   await mintPaymentToken(tok);
+
+  // Peek must NOT burn the token — confirmBooking validates against the peek and
+  // only consumes once every check has passed.
+  const peeked = await readPaymentToken(t);
+  console.assert(peeked?.transRef === 'TR-demo', 'peek reads the token');
+  console.assert((await readPaymentToken(t)) !== null, 'peek is non-destructive');
+
   const wrongSession = await consumePaymentToken(t, 'sessionB');
   console.assert(wrongSession === null, 'other session cannot consume token');
   const consumed = await consumePaymentToken(t, 'sessionA');
@@ -288,6 +324,12 @@ async function _demo() {
   console.assert((await negCacheGet(h)) === null, 'negcache empty before set');
   await negCacheSet(h, 'wrong-bank');
   console.assert((await negCacheGet(h)) === 'wrong-bank', 'negcache returns cached reason');
+
+  // positive cache: a verified slip round-trips so a retry never re-spends quota
+  await pub.del(`slip:poscache:${h}`);
+  console.assert((await posCacheGet(h)) === null, 'poscache empty before set');
+  await posCacheSet(h, { amount: 5999, transRef: 'TR-pos', receiver: { name: 'x' } });
+  console.assert((await posCacheGet(h))?.transRef === 'TR-pos', 'poscache round-trips slip data');
 
   // rate limit: allows exactly `limit` hits in the window, blocks the next
   await pub.del('slip:rl:demo:x');

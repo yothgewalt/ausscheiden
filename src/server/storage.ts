@@ -20,6 +20,9 @@ async function getS3() {
 // data:image/jpeg;base64,… → same shape rdcw.ts accepts. Returns [mime, ext, bytes]
 // or null if it isn't an image data-URL.
 const DATA_URL_RE = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/;
+
+// Must stay well under nginx's proxy_read_timeout — see uploadSlip.
+const UPLOAD_TIMEOUT_MS = 8_000;
 function parseSlip(dataUrl: string): { mime: string; ext: string; bytes: Buffer } | null {
   const m = DATA_URL_RE.exec(dataUrl);
   if (!m) return null;
@@ -46,7 +49,16 @@ export async function uploadSlip(
   }
   const key = `${prefix}/${ref}/slip.${parsed.ext}`;
   try {
-    await (await getS3()).write(key, parsed.bytes, { type: parsed.mime });
+    // Bounded: this runs AFTER the DB commit but INSIDE the request, so a hung
+    // MinIO would hold the response past nginx's proxy_read_timeout and hand the
+    // buyer an HTML 504 for a booking that actually succeeded. Losing the archive
+    // is recoverable; telling a paid buyer they failed is not.
+    await Promise.race([
+      (await getS3()).write(key, parsed.bytes, { type: parsed.mime }),
+      new Promise((_, rej) =>
+        setTimeout(() => rej(new Error(`upload timed out after ${UPLOAD_TIMEOUT_MS}ms`)), UPLOAD_TIMEOUT_MS)
+      ),
+    ]);
     return key;
   } catch (e: any) {
     console.error(`[storage] slip upload failed for ${key}: ${e?.message || e}`);

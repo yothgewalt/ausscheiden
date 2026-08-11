@@ -6,6 +6,13 @@ import { createHash } from 'node:crypto';
 
 const ENDPOINT = 'https://suba.rdcw.co.th/v2/inquiry';
 
+// Hard ceiling on the outbound inquiry. MUST stay below nginx's proxy_read_timeout
+// (75s on prod) so a hung RDCW is answered by US with a real Thai message — an
+// un-timed-out fetch let nginx win the race and reply with its HTML 504 page,
+// which the tRPC client then JSON.parse'd into
+// `Unexpected token '<', "<html> <h"... is not valid JSON` in the buyer's face.
+const TIMEOUT_MS = 20_000;
+
 /**
  * Stable content hash of a slip image data-URL — sha256 of the base64 body
  * (falls back to the whole string if it isn't a data-URL). Used to key the
@@ -110,9 +117,23 @@ const ERROR_TH: Record<number, string> = {
 };
 
 /**
+ * Thai message for a fetch that never produced a response. Split out from the
+ * call site so the timeout branch is assertable without a network (see the
+ * self-check below). A timeout is retryable and the retry is free — the caller
+ * caches a successful verdict by image hash — so the copy says "try again".
+ */
+export function transportErrorMessage(err: unknown): string {
+  const name = err instanceof Error ? err.name : '';
+  return name === 'TimeoutError' || name === 'AbortError'
+    ? 'ระบบตรวจสลิปใช้เวลานานเกินไป กรุณากดยืนยันการชำระเงินอีกครั้ง'
+    : 'เชื่อมต่อระบบตรวจสลิปไม่สำเร็จ กรุณาลองใหม่อีกครั้ง';
+}
+
+/**
  * Send the uploaded slip image (a `data:image/…;base64,…` URL from the browser)
  * to RDCW and return the parsed transaction data. Throws a Thai-message Error on
- * missing creds, a bad data URL, or any non-OK API response.
+ * missing creds, a bad data URL, a timeout/network failure, or any non-OK API
+ * response — every throw here is already user-facing copy.
  */
 export async function verifySlipImage(dataUrl: string): Promise<RdcwInquiry> {
   const clientId = process.env.RDCW_CLIENT_ID;
@@ -128,16 +149,32 @@ export async function verifySlipImage(dataUrl: string): Promise<RdcwInquiry> {
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { Authorization: `Basic ${auth}`, 'Content-Type': mime },
-    body: bytes,
-  });
+  const started = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Basic ${auth}`, 'Content-Type': mime },
+      body: bytes,
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch (err) {
+    // The only observability this path ever had was nginx's access log — the app
+    // logged nothing at all for the 504 that stranded a buyer. Log both branches.
+    console.error(
+      `[rdcw] inquiry failed after ${Date.now() - started}ms (${bytes.length}B ${mime}):`,
+      err instanceof Error ? `${err.name}: ${err.message}` : err
+    );
+    throw new Error(transportErrorMessage(err));
+  }
 
   const json = await res.json().catch(() => null);
 
   if (!res.ok) {
     const code = json?.code as number | undefined;
+    console.error(
+      `[rdcw] inquiry HTTP ${res.status} after ${Date.now() - started}ms (code=${code ?? '-'})`
+    );
     throw new Error(
       (code && ERROR_TH[code]) ||
         json?.message ||
@@ -177,5 +214,28 @@ if ((import.meta as { main?: boolean }).main) {
     hashSlipImage('data:image/png;base64,AAAA') !== hashSlipImage('data:image/png;base64,BBBB'),
     'different image body → different hash'
   );
+
+  // The 504 regression: a hung upstream must reject on OUR clock, and the
+  // rejection must map to the retryable Thai copy — never leak to the proxy.
+  ok(
+    transportErrorMessage(Object.assign(new Error('x'), { name: 'TimeoutError' })).includes('นานเกินไป'),
+    'TimeoutError → "took too long" copy'
+  );
+  ok(
+    transportErrorMessage(new TypeError('fetch failed')).includes('เชื่อมต่อ'),
+    'network error → "could not connect" copy'
+  );
+  const hung = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) });
+  const caught = await fetch(hung.url, { signal: AbortSignal.timeout(150) }).then(
+    () => null,
+    (e) => e as Error
+  );
+  hung.stop(true);
+  ok(caught?.name === 'TimeoutError', `AbortSignal.timeout aborts a hung fetch (got ${caught?.name})`);
+  ok(
+    transportErrorMessage(caught).includes('นานเกินไป'),
+    'a real aborted fetch maps to the timeout copy'
+  );
+
   console.log('all rdcw self-checks passed');
 }
