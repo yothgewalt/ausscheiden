@@ -1,5 +1,14 @@
 import Redis from 'ioredis';
+import type { Attributes, Span } from '@opentelemetry/api';
 import type { RdcwSlipData } from './rdcw';
+import { traced, sessionHash } from './otel';
+
+// Span wrapper for the lock/token ops — the concurrency- and money-critical
+// path. The pure cache reads (negcache/poscache/quota) are deliberately NOT
+// spanned here: slips.ts records them as semantic gate events instead, which
+// says why they mattered rather than just that a GET happened.
+const op = <T>(name: string, attributes: Attributes, fn: (span: Span) => Promise<T>): Promise<T> =>
+  traced(`redis.${name}`, attributes, fn);
 
 export type LockPhase = 'selecting' | 'pending_payment';
 export interface Lock {
@@ -53,39 +62,45 @@ function makeLock(id: string, phase: LockPhase, sessionId: string): Lock {
 
 /** Claim a table for 'selecting'. Idempotent for the owner; false if another session holds it. */
 export async function acquire(id: string, sessionId: string): Promise<Lock | null> {
-  const lock = makeLock(id, 'selecting', sessionId);
-  const ok = await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC, 'NX');
-  if (ok === 'OK') {
-    await publish({ id, phase: 'selecting', sessionId });
-    return lock;
-  }
-  // Already locked — allow the owner to refresh, reject everyone else.
-  const existing = await readLock(id);
-  if (existing && existing.sessionId === sessionId) {
-    await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC);
-    await publish({ id, phase: 'selecting', sessionId });
-    return lock;
-  }
-  return null;
+  return op('acquire', { 'table.id': id, 'session.hash': sessionHash(sessionId) }, async () => {
+    const lock = makeLock(id, 'selecting', sessionId);
+    const ok = await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC, 'NX');
+    if (ok === 'OK') {
+      await publish({ id, phase: 'selecting', sessionId });
+      return lock;
+    }
+    // Already locked — allow the owner to refresh, reject everyone else.
+    const existing = await readLock(id);
+    if (existing && existing.sessionId === sessionId) {
+      await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC);
+      await publish({ id, phase: 'selecting', sessionId });
+      return lock;
+    }
+    return null;
+  });
 }
 
 /** Move an owned lock to 'pending_payment' and reset the TTL. Null if not owner. */
 export async function promote(id: string, sessionId: string): Promise<Lock | null> {
-  const existing = await readLock(id);
-  if (!existing || existing.sessionId !== sessionId) return null;
-  const lock = makeLock(id, 'pending_payment', sessionId);
-  await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC);
-  await publish({ id, phase: 'pending_payment', sessionId });
-  return lock;
+  return op('promote', { 'table.id': id, 'session.hash': sessionHash(sessionId) }, async () => {
+    const existing = await readLock(id);
+    if (!existing || existing.sessionId !== sessionId) return null;
+    const lock = makeLock(id, 'pending_payment', sessionId);
+    await pub.set(keyOf(id), JSON.stringify(lock), 'EX', LOCK_TTL_SEC);
+    await publish({ id, phase: 'pending_payment', sessionId });
+    return lock;
+  });
 }
 
 /** Release an owned lock. No-op (returns false) if not owner or already gone. */
 export async function release(id: string, sessionId: string): Promise<boolean> {
-  const existing = await readLock(id);
-  if (!existing || existing.sessionId !== sessionId) return false;
-  await pub.del(keyOf(id));
-  await publish({ id, phase: null, sessionId });
-  return true;
+  return op('release', { 'table.id': id, 'session.hash': sessionHash(sessionId) }, async () => {
+    const existing = await readLock(id);
+    if (!existing || existing.sessionId !== sessionId) return false;
+    await pub.del(keyOf(id));
+    await publish({ id, phase: null, sessionId });
+    return true;
+  });
 }
 
 /**
@@ -95,14 +110,22 @@ export async function release(id: string, sessionId: string): Promise<boolean> {
  * payment and must survive a disconnect until it expires or confirms.
  */
 export async function releaseSelectingForSession(sessionId: string): Promise<number> {
-  const all = await list();
-  let freed = 0;
-  for (const lock of all) {
-    if (lock.sessionId === sessionId && lock.phase === 'selecting') {
-      if (await release(lock.id, sessionId)) freed++;
+  return op(
+    'releaseSelectingForSession',
+    { 'session.hash': sessionHash(sessionId) },
+    async (span) => {
+      const all = await list();
+      let freed = 0;
+      for (const lock of all) {
+        if (lock.sessionId === sessionId && lock.phase === 'selecting') {
+          if (await release(lock.id, sessionId)) freed++;
+        }
+      }
+      span.setAttribute('locks.scanned', all.length);
+      span.setAttribute('locks.freed', freed);
+      return freed;
     }
-  }
-  return freed;
+  );
 }
 
 /** All live locks, for merging into availability. */
@@ -136,7 +159,15 @@ const PAYTOKEN_TTL_SEC = LOCK_TTL_SEC;
 const payKey = (key: string) => `slip:paytoken:${key}`;
 
 export async function mintPaymentToken(tok: PaymentToken): Promise<void> {
-  await pub.set(payKey(tok.key), JSON.stringify(tok), 'EX', PAYTOKEN_TTL_SEC);
+  // token.key / bookingType / amount are safe; transRef and sessionId are not
+  // (one is a bank reference, the other a bearer capability).
+  await op(
+    'mintPaymentToken',
+    { 'token.key': tok.key, 'booking.type': tok.bookingType, 'booking.amount': tok.amount },
+    async () => {
+      await pub.set(payKey(tok.key), JSON.stringify(tok), 'EX', PAYTOKEN_TTL_SEC);
+    }
+  );
 }
 
 /**
@@ -147,8 +178,10 @@ export async function mintPaymentToken(tok: PaymentToken): Promise<void> {
  * single-use guard, so concurrent confirms are still mutually exclusive.
  */
 export async function readPaymentToken(key: string): Promise<PaymentToken | null> {
-  const raw = await pub.get(payKey(key));
-  return raw ? (JSON.parse(raw) as PaymentToken) : null;
+  return op('readPaymentToken', { 'token.key': key }, async () => {
+    const raw = await pub.get(payKey(key));
+    return raw ? (JSON.parse(raw) as PaymentToken) : null;
+  });
 }
 
 /**
@@ -178,14 +211,23 @@ export async function consumePaymentToken(
   // cjson.decode so a mismatch skips the parse; the authoritative check is the
   // decoded tok.sessionId compare. Session ids are crypto.randomUUID, so the
   // JSON-encoded form is unambiguous.
-  const raw = (await pub.eval(
-    CONSUME_TOKEN_LUA,
-    1,
-    payKey(key),
-    JSON.stringify(sessionId).slice(1, -1),
-    sessionId
-  )) as string | null;
-  return raw ? (JSON.parse(raw) as PaymentToken) : null;
+  return op(
+    'consumePaymentToken',
+    { 'token.key': key, 'session.hash': sessionHash(sessionId) },
+    async (span) => {
+      const raw = (await pub.eval(
+        CONSUME_TOKEN_LUA,
+        1,
+        payKey(key),
+        JSON.stringify(sessionId).slice(1, -1),
+        sessionId
+      )) as string | null;
+      // Whether the single-use token was actually burned is the single most
+      // useful fact when a buyer says "it took my money and did nothing".
+      span.setAttribute('token.consumed', raw !== null);
+      return raw ? (JSON.parse(raw) as PaymentToken) : null;
+    }
+  );
 }
 
 /**
@@ -234,10 +276,16 @@ export async function rateLimitHit(
   limit: number,
   windowSec: number
 ): Promise<boolean> {
-  const k = `slip:rl:${bucket}:${id}`;
-  const count = await pub.incr(k);
-  if (count === 1) await pub.expire(k, windowSec);
-  return count <= limit;
+  // Spanned because this is what silently locks a buyer out for 10 minutes —
+  // `id` is an IP or a session id, so it is hashed rather than recorded raw.
+  return op('rateLimitHit', { 'rl.bucket': bucket, 'rl.limit': limit }, async (span) => {
+    const k = `slip:rl:${bucket}:${id}`;
+    const count = await pub.incr(k);
+    if (count === 1) await pub.expire(k, windowSec);
+    span.setAttribute('rl.count', count);
+    span.setAttribute('rl.allowed', count <= limit);
+    return count <= limit;
+  });
 }
 
 // Global quota breaker: persist the usage/limit RDCW reports so we can refuse to

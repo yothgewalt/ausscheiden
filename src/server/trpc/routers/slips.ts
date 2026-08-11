@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { trace } from '@opentelemetry/api';
 import { eq } from 'drizzle-orm';
 import { router, publicProcedure } from '../trpc';
 import {
@@ -40,10 +41,19 @@ const QUOTA_RESERVE = 15; // keep this many calls for admin/edge cases
  */
 function fail(
   failureReason: string,
-  extra?: { transRef?: string; amount?: number }
+  extra?: { transRef?: string; amount?: number; gate?: string }
 ): { success: false; failureReason: string; transRef?: string; amount?: number } {
+  const { gate, ...rest } = extra ?? {};
+  // One choke point ⇒ one place to mark the span. `gate` names WHICH rung of the
+  // cheap→expensive ladder rejected the buyer, which is the thing you actually
+  // want to filter on in Jaeger. A rejection is a business outcome, not an
+  // exception, so the span stays OK — the attribute carries the verdict.
+  const span = trace.getActiveSpan();
+  span?.addEvent('verify.reject', { 'verify.gate': gate ?? 'unknown' });
+  span?.setAttribute('verify.outcome', 'rejected');
+  span?.setAttribute('verify.gate', gate ?? 'unknown');
   console.warn(`[slips.verify] reject: ${failureReason}`);
-  return { success: false, failureReason, ...extra };
+  return { success: false, failureReason, ...rest };
 }
 
 export const slipsRouter = router({
@@ -71,7 +81,7 @@ export const slipsRouter = router({
       const hash = hashSlipImage(input.slipImage);
       const cached = await negCacheGet(hash);
       if (cached) {
-        return fail(cached);
+        return fail(cached, { gate: 'negcache' });
       }
 
       // ── Gate 1b: positive cache. A verify that succeeded upstream but died
@@ -80,6 +90,12 @@ export const slipsRouter = router({
       // and after 5 tries lock them out for 10 minutes. Re-use the transaction we
       // already read from these exact bytes; every gate below still re-runs.
       const memo = await posCacheGet(hash);
+      if (memo) {
+        // The whole point of this cache is that a retry costs neither an RDCW
+        // call nor a rate-limit slot — make that visible, it is the thing to
+        // check when the ~115-call quota moves unexpectedly.
+        trace.getActiveSpan()?.addEvent('slip.poscache_hit');
+      }
 
       // ── Gate 2: rate limit. Only novel images spend budget — a cache hit costs
       // us nothing, so it must not cost the buyer a retry slot. Per-IP AND
@@ -88,7 +104,9 @@ export const slipsRouter = router({
         const ipOk = await rateLimitHit('ip', ctx.ip, IP_LIMIT, RL_WINDOW_SEC);
         const sidOk = await rateLimitHit('sid', ctx.sessionId, SESSION_LIMIT, RL_WINDOW_SEC);
         if (!ipOk || !sidOk) {
-          return fail('คุณส่งสลิปบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง (หรือติดต่อผู้ดูแลระบบ)');
+          return fail('คุณส่งสลิปบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่อีกครั้ง (หรือติดต่อผู้ดูแลระบบ)', {
+            gate: 'rate_limit',
+          });
         }
       }
 
@@ -102,11 +120,11 @@ export const slipsRouter = router({
         tokenKey = `individual:${ctx.sessionId}`;
       } else {
         if (!input.tableId) {
-          return fail('ไม่พบโต๊ะที่เลือก กรุณาลองใหม่');
+          return fail('ไม่พบโต๊ะที่เลือก กรุณาลองใหม่', { gate: 'table_missing' });
         }
         const [row] = await ctx.db.select().from(tables).where(eq(tables.id, input.tableId));
         if (!row) {
-          return fail('ไม่พบโต๊ะที่เลือก กรุณาลองใหม่');
+          return fail('ไม่พบโต๊ะที่เลือก กรุณาลองใหม่', { gate: 'table_missing' });
         }
         // The caller must actually HOLD this table. mintPaymentToken is a bare SET
         // keyed by tableId, so without this a second session could verify against
@@ -116,7 +134,9 @@ export const slipsRouter = router({
         // (confirmBooking rejects it anyway, just later and more expensively).
         const lock = await readLock(input.tableId);
         if (!lock || lock.sessionId !== ctx.sessionId) {
-          return fail('สิทธิ์การจองโต๊ะนี้หมดอายุแล้ว กรุณาเลือกโต๊ะและจองใหม่อีกครั้ง');
+          return fail('สิทธิ์การจองโต๊ะนี้หมดอายุแล้ว กรุณาเลือกโต๊ะและจองใหม่อีกครั้ง', {
+            gate: 'lock_not_owned',
+          });
         }
         expectedAmount = row.pricePerTable;
         tokenKey = input.tableId;
@@ -132,7 +152,9 @@ export const slipsRouter = router({
         // the last quota RDCW reported (persisted below). Cold start ⇒ allow.
         const q = await quotaCacheRead();
         if (q && q.usage >= q.limit - QUOTA_RESERVE) {
-          return fail('ระบบไม่สามารถรับการจองได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ');
+          return fail('ระบบไม่สามารถรับการจองได้ในขณะนี้ กรุณาติดต่อผู้ดูแลระบบ', {
+            gate: 'quota_breaker',
+          });
         }
 
         // All gates passed — spend one RDCW call.
@@ -143,7 +165,9 @@ export const slipsRouter = router({
           // with transient (network / timeout / HTTP 5xx / creds) errors, and caching a
           // transient failure would reject a good re-upload for 24h. The rate limit
           // already caps junk-image spam.
-          return fail(err instanceof Error ? err.message : 'ตรวจสอบสลิปไม่สำเร็จ');
+          return fail(err instanceof Error ? err.message : 'ตรวจสอบสลิปไม่สำเร็จ', {
+            gate: 'rdcw_error',
+          });
         }
 
         // Persist the freshest quota so the breaker above works across restarts.
@@ -159,13 +183,13 @@ export const slipsRouter = router({
       if (!receiverMatches(data.receiver?.displayName ?? data.receiver?.name)) {
         const reason = 'บัญชีผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี';
         await negCacheSet(hash, reason);
-        return fail(reason);
+        return fail(reason, { gate: 'payee_mismatch' });
       }
 
       if (data.receivingBank && data.receivingBank !== EXPECTED_RECEIVING_BANK) {
         const reason = 'ธนาคารผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี';
         await negCacheSet(hash, reason);
-        return fail(reason);
+        return fail(reason, { gate: 'bank_mismatch' });
       }
 
       // PromptPay proxy check — only rejects on a definite mismatch. Absent or fully
@@ -174,7 +198,7 @@ export const slipsRouter = router({
       if (proxyMatches(data.receiver?.proxy?.value) === false) {
         const reason = 'พร้อมเพย์ผู้รับเงินในสลิปไม่ตรงกับบัญชีของงาน กรุณาตรวจสอบว่าโอนถูกบัญชี';
         await negCacheSet(hash, reason);
-        return fail(reason);
+        return fail(reason, { gate: 'promptpay_mismatch' });
       }
 
       // The slip is a real transfer to the right payee. Memoise it BEFORE the
@@ -187,7 +211,7 @@ export const slipsRouter = router({
       if (data.amount !== expectedAmount) {
         return fail(
           `ยอดเงินโอน (${data.amount.toLocaleString()} บาท) ไม่ตรงกับยอดที่ต้องชำระ (${expectedAmount.toLocaleString()} บาท)`,
-          { transRef: data.transRef, amount: data.amount }
+          { transRef: data.transRef, amount: data.amount, gate: 'amount_mismatch' }
         );
       }
 
@@ -203,6 +227,7 @@ export const slipsRouter = router({
       if (used) {
         return fail('สลิปนี้ถูกใช้ยืนยันการชำระเงินไปแล้ว กรุณาใช้สลิปการโอนใหม่', {
           transRef: data.transRef,
+          gate: 'slip_used',
         });
       }
 
@@ -216,6 +241,13 @@ export const slipsRouter = router({
         amount: expectedAmount,
         bookingType: input.bookingType,
       });
+
+      const span = trace.getActiveSpan();
+      span?.setAttribute('verify.outcome', 'accepted');
+      span?.setAttribute('verify.from_cache', Boolean(memo));
+      span?.setAttribute('booking.amount', expectedAmount);
+      span?.setAttribute('token.key', tokenKey);
+      span?.addEvent('verify.accepted');
 
       console.info(
         `[slips.verify] ok: transRef=${data.transRef} key=${tokenKey} amount=${expectedAmount}${memo ? ' (cached, no API call)' : ''}`

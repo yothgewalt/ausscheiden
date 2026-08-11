@@ -1,3 +1,8 @@
+// MUST be first: registers the global tracer provider before anything — Next
+// included — can start a span. One registration covers both transports, since
+// the Next route handlers and the tRPC WebSocket share this process.
+import { traced, event, sessionHash, tracingEnabled } from './src/server/otel';
+
 import { createServer } from 'node:http';
 import { parse } from 'node:url';
 import { networkInterfaces } from 'node:os';
@@ -35,7 +40,13 @@ app.prepare().then(() => {
   // pre-payment 'selecting' locks so the table doesn't sit greyed-out for the
   // full 10-min TTL. Grace absorbs reloads/reconnects; pending_payment is spared.
   const presence = new SessionPresence(10_000, (sessionId) => {
-    releaseSelectingForSession(sessionId).catch((e) =>
+    // Fires from a setTimeout ~10s after the last socket closed, so it has no
+    // ambient parent — this is a deliberate ROOT span, otherwise the Redis work
+    // it does (KEYS + MGET + N×DEL/PUBLISH) is invisible.
+    traced('presence.releaseSelecting', { 'session.hash': sessionHash(sessionId) }, async (span) => {
+      const freed = await releaseSelectingForSession(sessionId);
+      span.setAttribute('locks.freed', freed);
+    }).catch((e) =>
       console.error(`[presence] release failed for ${sessionId}: ${e?.message || e}`),
     );
   });
@@ -43,6 +54,9 @@ app.prepare().then(() => {
   const trpcHandler = applyWSSHandler({
     wss,
     router: appRouter,
+    // Subscription errors were silently dropped before this.
+    onError: ({ error, path, type }) =>
+      console.error(`[trpc.ws] ${type} ${path ?? '<no-path>'} failed: ${error.code} ${error.message}`),
     // WS clients already carry the session cookie from their first HTTP hit;
     // just read it — no cookie to mint here, so drop mintedSid.
     createContext: ({ req }) => {
@@ -60,7 +74,11 @@ app.prepare().then(() => {
   // Bind each socket to its session so presence can refcount tabs and clean up.
   wss.on('connection', (ws, req) => {
     const sid = buildContext(req.headers.cookie).ctx.sessionId;
-    presence.connect(sid, ws);
+    // Root span: a socket open has no incoming trace context. Cheap, but it is
+    // the only record that a client connected at all.
+    traced('ws.connect', { 'session.hash': sessionHash(sid) }, async () => {
+      presence.connect(sid, ws);
+    }).catch(() => {});
     ws.on('close', () => presence.disconnect(sid, ws));
   });
 
@@ -75,6 +93,10 @@ app.prepare().then(() => {
       // the one host the browser is told to dial, so no new config to keep in sync.
       const origin = req.headers.origin;
       if (allowedOrigin && origin && origin !== allowedOrigin) {
+        // A rejected CSWSH attempt left no trace at all before this.
+        traced('ws.rejected', { 'ws.reason': 'origin_mismatch', 'http.origin': origin }, async () => {
+          event('ws.origin_rejected', { expected: allowedOrigin });
+        }).catch(() => {});
         socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
         socket.destroy();
         return;
@@ -87,7 +109,9 @@ app.prepare().then(() => {
   });
 
   server.listen(port, () => {
-    console.log(`> Ready (ws /api/trpc) — ${dev ? 'dev' : 'prod'}`);
+    console.log(
+      `> Ready (ws /api/trpc) — ${dev ? 'dev' : 'prod'}${tracingEnabled ? ` — tracing → ${process.env.OTEL_EXPORTER_OTLP_ENDPOINT}` : ' — tracing off'}`
+    );
     console.log(`  - Local:   http://localhost:${port}`);
     for (const ifaces of Object.values(networkInterfaces()))
       for (const i of ifaces ?? [])

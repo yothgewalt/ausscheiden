@@ -17,6 +17,8 @@ async function getS3() {
   return s3;
 }
 
+import { traced, event } from './otel';
+
 // data:image/jpeg;base64,… → same shape rdcw.ts accepts. Returns [mime, ext, bytes]
 // or null if it isn't an image data-URL.
 const DATA_URL_RE = /^data:(image\/[a-zA-Z+]+);base64,(.+)$/;
@@ -44,26 +46,42 @@ export async function uploadSlip(
 ): Promise<string | null> {
   const parsed = parseSlip(dataUrl);
   if (!parsed) {
+    event('storage.bad_data_url', { 'storage.prefix': prefix });
     console.error(`[storage] slip for ${prefix}/${ref} is not an image data-URL`);
     return null;
   }
   const key = `${prefix}/${ref}/slip.${parsed.ext}`;
-  try {
-    // Bounded: this runs AFTER the DB commit but INSIDE the request, so a hung
-    // MinIO would hold the response past nginx's proxy_read_timeout and hand the
-    // buyer an HTML 504 for a booking that actually succeeded. Losing the archive
-    // is recoverable; telling a paid buyer they failed is not.
-    await Promise.race([
-      (await getS3()).write(key, parsed.bytes, { type: parsed.mime }),
-      new Promise((_, rej) =>
-        setTimeout(() => rej(new Error(`upload timed out after ${UPLOAD_TIMEOUT_MS}ms`)), UPLOAD_TIMEOUT_MS)
-      ),
-    ]);
-    return key;
-  } catch (e: any) {
-    console.error(`[storage] slip upload failed for ${key}: ${e?.message || e}`);
-    return null;
-  }
+  // Best-effort by contract, so the span must NOT propagate the failure — record
+  // it and return null. That is why this catches inside rather than letting
+  // traced() re-throw.
+  return traced(
+    'storage.uploadSlip',
+    {
+      'storage.key': key,
+      'slip.bytes': parsed.bytes.length,
+      'slip.mime': parsed.mime,
+      'storage.timeout_ms': UPLOAD_TIMEOUT_MS,
+    },
+    async (span) => {
+      try {
+        // Bounded: this runs AFTER the DB commit but INSIDE the request, so a hung
+        // MinIO would hold the response past nginx's proxy_read_timeout and hand the
+        // buyer an HTML 504 for a booking that actually succeeded. Losing the archive
+        // is recoverable; telling a paid buyer they failed is not.
+        await Promise.race([
+          (await getS3()).write(key, parsed.bytes, { type: parsed.mime }),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(new Error(`upload timed out after ${UPLOAD_TIMEOUT_MS}ms`)), UPLOAD_TIMEOUT_MS)
+          ),
+        ]);
+        return key;
+      } catch (e: any) {
+        span.addEvent('storage.upload_failed', { 'error.message': String(e?.message || e) });
+        console.error(`[storage] slip upload failed for ${key}: ${e?.message || e}`);
+        return null;
+      }
+    }
+  );
 }
 
 // ── self-check: bun src/server/storage.ts ──────────────────────────────────

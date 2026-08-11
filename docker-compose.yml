@@ -53,6 +53,19 @@ services:
       /bin/sh -c "until mc alias set local http://minio:9000 ausscheiden ausscheiden;
       do sleep 1; done; mc mb --ignore-existing local/slips"
 
+  # Traces. `bun run dev` runs on the host, not in compose, so point it here:
+  #   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 bun run dev
+  # Leave that var unset and the app registers no tracer at all — spans become
+  # non-recording no-ops, so dev without this container still works.
+  # v2 serves OTLP on 4317/4318 by default (v1 all-in-one needed COLLECTOR_OTLP_ENABLED).
+  # In-memory storage: traces vanish on restart, which is what you want locally.
+  jaeger:
+    image: jaegertracing/jaeger:2.11.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16686:16686"   # web UI
+      - "127.0.0.1:4318:4318"     # OTLP/HTTP — what the app exports to
+
 volumes:
   pgdata:
   redisdata:

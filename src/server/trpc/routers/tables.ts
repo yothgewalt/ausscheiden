@@ -8,6 +8,7 @@ import * as locks from '../../redis';
 import type { LockEvent } from '../../redis';
 import type { DB } from '../../db';
 import { uploadSlip } from '../../storage';
+import { traced, event } from '../../otel';
 
 // The tx handle drizzle hands the transaction callback — same query API as DB but
 // no `$client`. Derived from DB so it tracks the schema automatically.
@@ -212,7 +213,14 @@ export const tablesRouter = router({
       | { ok: true; id: string }
       | { ok: false; reason: 'sold_out' | 'slip_used' | 'ref_conflict' };
     try {
-      result = await ctx.db.transaction(async (tx) => {
+      // Its own span: this is the atomic section, and for individual tickets it
+      // BLOCKS on a Postgres advisory lock. If confirms ever queue up, the wait
+      // shows here and nowhere else.
+      result = await traced(
+        'db.transaction.confirmBooking',
+        { 'booking.type': input.bookingType, 'db.advisory_lock': input.bookingType === 'individual' },
+        async (txSpan) => {
+          const r = await ctx.db.transaction(async (tx) => {
       if (input.bookingType === 'individual') {
         // ponytail: one fixed key for the sole capped pool. Per-pool keys if a
         // second capped tier is ever added.
@@ -266,7 +274,13 @@ export const tablesRouter = router({
       }
 
       return { ok: true as const, id: row.id };
-      });
+          });
+          // committed | sold_out | slip_used | ref_conflict — the one field that
+          // says whether a paying buyer actually got a booking row.
+          txSpan.setAttribute('booking.outcome', r.ok ? 'committed' : r.reason);
+          return r;
+        }
+      );
     } catch (err) {
       // The unique trans_ref index is the atomic backstop: if two sessions race
       // past the read-check above, one insert throws 23505 (unique_violation).
@@ -302,6 +316,9 @@ export const tablesRouter = router({
           .where(eq(bookings.id, result.id));
       }
     } else {
+      // A rejection here means the buyer paid and got nothing — the single most
+      // important event in this file.
+      event('confirm.rejected', { 'booking.reason': result.reason, 'token.key': tokenKey });
       console.warn(`[confirmBooking] reject ${result.reason} ref=${input.ref} key=${tokenKey}`);
     }
 

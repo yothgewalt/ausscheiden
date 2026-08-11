@@ -3,6 +3,7 @@
 // Auth: HTTP Basic base64(clientId:clientSecret). Accepts raw image bytes.
 
 import { createHash } from 'node:crypto';
+import { traced } from './otel';
 
 const ENDPOINT = 'https://suba.rdcw.co.th/v2/inquiry';
 
@@ -149,44 +150,77 @@ export async function verifySlipImage(dataUrl: string): Promise<RdcwInquiry> {
 
   const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
-  const started = Date.now();
-  let res: Response;
-  try {
-    res = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: { Authorization: `Basic ${auth}`, 'Content-Type': mime },
-      body: bytes,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (err) {
-    // The only observability this path ever had was nginx's access log — the app
-    // logged nothing at all for the 504 that stranded a buyer. Log both branches.
-    console.error(
-      `[rdcw] inquiry failed after ${Date.now() - started}ms (${bytes.length}B ${mime}):`,
-      err instanceof Error ? `${err.name}: ${err.message}` : err
-    );
-    throw new Error(transportErrorMessage(err));
-  }
+  // The span replaces the hand-rolled Date.now() timing: this is the call that
+  // hung and produced the proxy 504, so its duration IS the thing to watch.
+  // NEVER attribute the image or its base64 — only its size.
+  return traced(
+    'rdcw.inquiry',
+    {
+      'http.request.method': 'POST',
+      'server.address': 'suba.rdcw.co.th',
+      'slip.bytes': bytes.length,
+      'slip.mime': mime,
+      'rdcw.timeout_ms': TIMEOUT_MS,
+    },
+    async (span) => {
+      const started = Date.now();
+      let res: Response;
+      try {
+        res = await fetch(ENDPOINT, {
+          method: 'POST',
+          headers: { Authorization: `Basic ${auth}`, 'Content-Type': mime },
+          body: bytes,
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+      } catch (err) {
+        // The only observability this path ever had was nginx's access log — the app
+        // logged nothing at all for the 504 that stranded a buyer. Log both branches.
+        const name = err instanceof Error ? err.name : 'unknown';
+        span.addEvent(name === 'TimeoutError' ? 'rdcw.timeout' : 'rdcw.transport_error', {
+          'error.name': name,
+          elapsed_ms: Date.now() - started,
+        });
+        console.error(
+          `[rdcw] inquiry failed after ${Date.now() - started}ms (${bytes.length}B ${mime}):`,
+          err instanceof Error ? `${err.name}: ${err.message}` : err
+        );
+        throw new Error(transportErrorMessage(err));
+      }
 
-  const json = await res.json().catch(() => null);
+      span.setAttribute('http.response.status_code', res.status);
+      const json = await res.json().catch(() => null);
 
-  if (!res.ok) {
-    const code = json?.code as number | undefined;
-    console.error(
-      `[rdcw] inquiry HTTP ${res.status} after ${Date.now() - started}ms (code=${code ?? '-'})`
-    );
-    throw new Error(
-      (code && ERROR_TH[code]) ||
-        json?.message ||
-        `ตรวจสอบสลิปไม่สำเร็จ (HTTP ${res.status})`
-    );
-  }
+      if (!res.ok) {
+        const code = json?.code as number | undefined;
+        span.addEvent('rdcw.http_error', {
+          'http.response.status_code': res.status,
+          'rdcw.code': code ?? -1,
+          elapsed_ms: Date.now() - started,
+        });
+        console.error(
+          `[rdcw] inquiry HTTP ${res.status} after ${Date.now() - started}ms (code=${code ?? '-'})`
+        );
+        throw new Error(
+          (code && ERROR_TH[code]) ||
+            json?.message ||
+            `ตรวจสอบสลิปไม่สำเร็จ (HTTP ${res.status})`
+        );
+      }
 
-  if (!json?.valid || !json?.data) {
-    throw new Error('ไม่พบข้อมูลการโอนในสลิปนี้ กรุณาตรวจสอบสลิปอีกครั้ง');
-  }
+      if (!json?.valid || !json?.data) {
+        span.addEvent('rdcw.unreadable_slip');
+        throw new Error('ไม่พบข้อมูลการโอนในสลิปนี้ กรุณาตรวจสอบสลิปอีกครั้ง');
+      }
 
-  return { data: json.data as RdcwSlipData, quota: json.quota as RdcwQuota | undefined };
+      const quota = json.quota as RdcwQuota | undefined;
+      if (quota) {
+        // The account has ~115 calls for its whole life — surface how many are left.
+        span.setAttribute('rdcw.quota_usage', quota.usage);
+        span.setAttribute('rdcw.quota_limit', quota.limit);
+      }
+      return { data: json.data as RdcwSlipData, quota };
+    }
+  );
 }
 
 // ── ponytail self-check: money/security matcher gets one runnable assert. ──

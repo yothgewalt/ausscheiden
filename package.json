@@ -11,6 +11,11 @@
         "db:seed": "bun src/server/db/seed.ts"
     },
     "dependencies": {
+        "@opentelemetry/api": "^1.9.1",
+        "@opentelemetry/exporter-trace-otlp-http": "^0.221.0",
+        "@opentelemetry/resources": "^2.10.0",
+        "@opentelemetry/sdk-trace-node": "^2.10.0",
+        "@opentelemetry/semantic-conventions": "^1.43.0",
         "@tanstack/react-query": "^5.101.4",
         "@trpc/client": "^11.18.0",
         "@trpc/react-query": "^11.18.0",
