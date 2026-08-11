@@ -51,6 +51,16 @@ async function publish(evt: LockEvent) {
   await pub.publish(CHANNEL, JSON.stringify(evt));
 }
 
+/**
+ * Announce that a table changed for a reason that isn't a lock transition —
+ * today that means the backoffice booked it by hand. Every connected buyer's
+ * onLockChange handler invalidates tables.list on ANY event, so a null-phase
+ * event is all it takes to make open seat maps repaint the table as booked.
+ */
+export async function notifyTableChanged(id: string): Promise<void> {
+  await publish({ id, phase: null, sessionId: 'admin' });
+}
+
 export async function readLock(id: string): Promise<Lock | null> {
   const raw = await pub.get(keyOf(id));
   return raw ? (JSON.parse(raw) as Lock) : null;

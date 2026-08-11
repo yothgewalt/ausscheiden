@@ -37,6 +37,9 @@ export const bookings = pgTable('bookings', {
   // source of truth). Nullable: prod rows predate this column.
   transRef: text('trans_ref').unique(),
   status: text('status').notNull().default('confirmed'),
+  // Stamped when an organiser ticks the row in the backoffice checklist after
+  // sending the confirmation email by hand. NULL = not emailed yet.
+  emailSentAt: timestamp('email_sent_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 });
 

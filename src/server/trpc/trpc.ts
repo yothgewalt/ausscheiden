@@ -1,4 +1,4 @@
-import { initTRPC } from '@trpc/server';
+import { initTRPC, TRPCError } from '@trpc/server';
 import { SpanStatusCode } from '@opentelemetry/api';
 import superjson from 'superjson';
 import { db } from '../db';
@@ -8,6 +8,7 @@ export interface Context {
   db: typeof db;
   sessionId: string;
   ip: string; // client IP (from x-forwarded-for behind nginx) for rate limiting
+  isAdmin: boolean; // backoffice cookie verified against ADMIN_TOKEN (see server/admin.ts)
 }
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });
@@ -52,3 +53,17 @@ const tracing = t.middleware(({ ctx, path, type, next }) =>
 
 export const router = t.router;
 export const publicProcedure = t.procedure.use(tracing);
+
+/**
+ * Backoffice-only procedures. This is the real security boundary — the
+ * /backoffice pages redirect on a missing cookie for UX, but every byte of
+ * buyer data leaves through here, so the check must live on the procedure.
+ * Traced like everything else, and a rejection surfaces as an ERROR span with
+ * code UNAUTHORIZED.
+ */
+export const adminProcedure = publicProcedure.use(({ ctx, next }) => {
+  if (!ctx.isAdmin) {
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'ต้องเข้าสู่ระบบผู้ดูแลก่อน' });
+  }
+  return next();
+});

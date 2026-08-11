@@ -18,7 +18,7 @@ type Tx = Parameters<Parameters<DB['transaction']>[0]>[0];
 // on the next request. Falls back to the seed default if the row isn't there yet
 // (unseeded DB), so nothing breaks before the first db:seed. Accepts a tx too, so
 // the confirm path can read the cap inside its atomic section.
-async function individualCapacity(db: DB | Tx): Promise<number> {
+export async function individualCapacity(db: DB | Tx): Promise<number> {
   const [row] = await db.select().from(settings).where(eq(settings.id, 1));
   return row?.individualCapacity ?? INDIVIDUAL_CAPACITY;
 }

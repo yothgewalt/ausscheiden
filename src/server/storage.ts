@@ -84,6 +84,39 @@ export async function uploadSlip(
   );
 }
 
+/**
+ * Fetch an archived slip by its object key (the value of `bookings.slip_path`).
+ * Returns null when the key is missing from the bucket or MinIO is unreachable —
+ * the backoffice renders "no slip" rather than a 500.
+ *
+ * Callers must take the key from the database, never from user input: this
+ * function does no path validation because there is no legitimate caller that
+ * has one to validate.
+ */
+export async function readSlip(
+  key: string
+): Promise<{ bytes: Buffer; mime: string } | null> {
+  return traced('storage.readSlip', { 'storage.key': key }, async (span) => {
+    try {
+      // Same bound as the upload path: a hung MinIO must not hold the response
+      // open past nginx's proxy_read_timeout.
+      const buf = (await Promise.race([
+        (await getS3()).file(key).arrayBuffer(),
+        new Promise((_, rej) =>
+          setTimeout(() => rej(new Error(`read timed out after ${UPLOAD_TIMEOUT_MS}ms`)), UPLOAD_TIMEOUT_MS)
+        ),
+      ])) as ArrayBuffer;
+      // Trust the key's own extension: uploadSlip minted it from the verified mime.
+      const ext = key.slice(key.lastIndexOf('.') + 1);
+      return { bytes: Buffer.from(buf), mime: `image/${ext === 'jpg' ? 'jpeg' : ext}` };
+    } catch (e: any) {
+      span.addEvent('storage.read_failed', { 'error.message': String(e?.message || e) });
+      console.error(`[storage] slip read failed for ${key}: ${e?.message || e}`);
+      return null;
+    }
+  });
+}
+
 // ── self-check: bun src/server/storage.ts ──────────────────────────────────
 async function _demo() {
   const png = 'data:image/png;base64,aGVsbG8='; // "hello"

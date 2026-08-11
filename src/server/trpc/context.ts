@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { db } from '../db';
+import { isAdminRequest } from '../admin';
 import type { Context } from './trpc';
 
 export const SESSION_COOKIE = 'ausscheiden_sid';
@@ -107,7 +108,9 @@ export function buildContext(
   const existing = verifySid(parseCookie(cookieHeader, SESSION_COOKIE));
   const sessionId = existing ?? newSid();
   return {
-    ctx: { db, sessionId, ip },
+    // The backoffice cookie is independent of the buyer session: an organiser's
+    // browser carries both, and neither grants the other's rights.
+    ctx: { db, sessionId, ip, isAdmin: isAdminRequest(cookieHeader) },
     mintedSid: existing ? undefined : sessionId,
   };
 }

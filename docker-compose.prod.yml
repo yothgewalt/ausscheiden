@@ -19,6 +19,9 @@ services:
       # per-process key (cookies reset on restart) instead of failing. Set it to
       # keep signatures stable across restarts/redeploys.
       SESSION_SECRET: ${SESSION_SECRET:-}
+      # Gates /backoffice. Required: an empty value would leave the organisers
+      # unable to log in, so fail the deploy loudly rather than ship a dead door.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?set ADMIN_TOKEN (openssl rand -base64 32)}
       RDCW_CLIENT_ID: ${RDCW_CLIENT_ID:-}
       RDCW_CLIENT_SECRET: ${RDCW_CLIENT_SECRET:-}
       S3_ENDPOINT: http://minio:9000
