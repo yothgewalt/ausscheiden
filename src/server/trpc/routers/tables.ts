@@ -9,6 +9,7 @@ import type { LockEvent } from '../../redis';
 import type { DB } from '../../db';
 import { uploadSlip } from '../../storage';
 import { traced, event } from '../../otel';
+import { salesOpen, closesAt } from '../../sales';
 
 // The tx handle drizzle hands the transaction callback — same query API as DB but
 // no `$client`. Derived from DB so it tracks the schema automatically.
@@ -96,7 +97,19 @@ export const tablesRouter = router({
     return byZone;
   }),
 
+  // Whether public booking is still open, for the UI. Server-owned: a
+  // NEXT_PUBLIC_ var would bake at build time, and a client clock can't be
+  // trusted with the cutoff. No DB hit.
+  salesStatus: publicProcedure.query(() => ({
+    open: salesOpen(),
+    closesAt: closesAt?.toISOString() ?? null,
+  })),
+
   acquireLock: publicProcedure.input(tableIdInput).mutation(async ({ ctx, input }) => {
+    // Sales cutoff, checked before anything else costs a round-trip. Stops a NEW
+    // table being taken; an in-flight buyer who already paid still confirms.
+    if (!salesOpen()) return { ok: false as const, reason: 'closed' as const };
+
     // Abuse gates. acquireLock is unauthenticated and holds a table for the full
     // 10-min TTL; an HTTP-only caller (never opens the WS) is never in
     // SessionPresence, so its locks aren't freed on disconnect. Without a limit,

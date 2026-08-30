@@ -10,6 +10,7 @@ import {
   EXPECTED_RECEIVING_BANK,
 } from '../../rdcw';
 import type { RdcwSlipData, RdcwQuota } from '../../rdcw';
+import { salesOpen } from '../../sales';
 import {
   mintPaymentToken,
   negCacheGet,
@@ -75,6 +76,14 @@ export const slipsRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
+      // ── Gate 0: sales cutoff. First, so a closed sale never spends an RDCW
+      // call. This is the gate that covers ALL THREE booking types — the
+      // individual tier never touches acquireLock — and it sits before any
+      // money moves, so nobody pays into a closed sale.
+      if (!salesOpen()) {
+        return fail('ปิดรับการจองแล้ว', { gate: 'sales_closed' });
+      }
+
       // ── Gate 1: negative cache. Same image bytes that already failed an
       // intrinsic check (wrong payee/bank/proxy) fail identically — return the
       // cached verdict with ZERO API calls. Pure CPU hash + one Redis GET.

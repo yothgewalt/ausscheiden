@@ -32,6 +32,11 @@ services:
       # no tracer and every span is a non-recording no-op).
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: ausscheiden
+      # Public booking cutoff (ISO-8601 with offset, e.g. 2026-09-01T00:00:00+07:00).
+      # `:-` not `:?`: unset means "stay open", which is the safe default and must
+      # never block a deploy. Changing the deadline is an .env edit + `up -d` —
+      # it is read at runtime, so no image rebuild.
+      BOOKING_CLOSES_AT: ${BOOKING_CLOSES_AT:-}
     depends_on:
       postgres:
         condition: service_healthy

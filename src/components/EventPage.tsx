@@ -68,7 +68,21 @@ const schedule = [
 ];
 
 export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
-  const { eventDetails, tables, zoneAvailability } = useBooking();
+  const { eventDetails, tables, zoneAvailability, salesOpen, salesClosesAt } = useBooking();
+
+  // Explicit `=== false`, so the closed state never flashes while salesStatus is
+  // still loading (same reason zonesReady gates the counts below).
+  const salesClosed = salesOpen === false;
+
+  // The deadline as announced in Bangkok, whatever timezone the visitor is in.
+  const closesAtTh = React.useMemo(() => {
+    if (!salesClosesAt) return null;
+    return new Date(salesClosesAt).toLocaleString('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      dateStyle: 'long',
+      timeStyle: 'short',
+    });
+  }, [salesClosesAt]);
 
   // A tier is full when its backing zone has zero available tables. 'individual' is
   // now table-backed too (zoneAvailability.individual = 16 − confirmed individuals).
@@ -207,20 +221,44 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
               <span className="text-base font-bold text-primary">ลงทะเบียนงานครบรอบ 30 ปี ภาควิชาฯ</span>
             </div>
             <div className="p-5 space-y-4">
-              <p className="text-sm text-muted">เลือกประเภทบัตรที่ต้องการ</p>
+              {/* Closed banner. Amber is the page's single status signal — this is
+                  that one meaning; the CTA below stays neutral. role=status so the
+                  60s poll flipping it mid-visit is announced, and the state is
+                  carried by text, never by colour alone. */}
+              {salesClosed ? (
+                <div
+                  role="status"
+                  className="rounded-lg bg-[#D69712]/10 px-4 py-3 text-sm text-primary"
+                >
+                  <span className="font-semibold">ปิดรับการจองแล้ว</span>
+                  {closesAtTh && (
+                    <span className="block mt-0.5 text-muted">
+                      หมดเขตเมื่อ {closesAtTh} น. (เวลาประเทศไทย)
+                    </span>
+                  )}
+                  <span className="block mt-1 text-muted">
+                    หากต้องการสอบถามเพิ่มเติม กรุณาติดต่อผู้จัดงาน
+                  </span>
+                </div>
+              ) : (
+                <p className="text-sm text-muted">เลือกประเภทบัตรที่ต้องการ</p>
+              )}
 
               {/* t`icket-tier radio rows — click to select, checked circle activates */}
               <div className="space-y-2.5">
                 {zones.map((z) => {
                   const active = selectedZone === z.id;
                   const full = isZoneFull(z.id);
+                  // Full and closed both disable the row, but they are NOT the same
+                  // fact — the badge below must not call a closed sale "เต็ม".
+                  const locked = full || salesClosed;
                   return (
                     <button
                       key={z.id}
-                      onClick={() => !full && setSelectedZone(z.id)}
-                      disabled={full}
+                      onClick={() => !locked && setSelectedZone(z.id)}
+                      disabled={locked}
                       className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
-                        full
+                        locked
                           ? 'bg-page opacity-60 cursor-not-allowed'
                           : active
                             ? 'bg-page ring-[1px] ring-primary cursor-pointer'
@@ -256,9 +294,15 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
                             </span>
                           )}
                         </span>
-                        {/* availability badge — grey skeleton until ready, then green "ยังมีที่ว่าง" / red "เต็ม" */}
+                        {/* availability badge — grey skeleton until ready, then grey
+                            "ปิดรับแล้ว" (cutoff) / red "เต็ม" (sold out) / green "ยังมีที่ว่าง".
+                            Closed outranks full: it is why the row is dead. */}
                         {!zonesReady ? (
                           <span className="shrink-0 w-14 h-5 rounded-full bg-hairline" />
+                        ) : salesClosed ? (
+                          <span className="shrink-0 px-2 py-0.5 rounded-full bg-[rgba(20,20,20,0.08)] text-muted text-[11px] font-medium">
+                            ปิดรับแล้ว
+                          </span>
                         ) : full ? (
                           <span className="shrink-0 px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 text-[11px] font-medium">
                             เต็ม
@@ -280,10 +324,24 @@ export const EventPage: React.FC<EventPageProps> = ({ onSelectZone }) => {
               {/* primary CTA — neutral #141414, never amber → commits the selected tier */}
               <button
                 onClick={() => onSelectZone(selectedZone)}
-                className="w-full py-3 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer group"
+                disabled={salesClosed}
+                aria-disabled={salesClosed}
+                className={`w-full py-3 rounded-lg text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors group ${
+                  salesClosed
+                    ? 'bg-primary/40 cursor-not-allowed'
+                    : 'bg-primary hover:bg-primary/90 cursor-pointer'
+                }`}
               >
-                <span>{selectedZone === 'individual' ? 'กรอกข้อมูลผู้จอง' : 'เลือกโต๊ะและดูผังที่นั่ง'}</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                <span>
+                  {salesClosed
+                    ? 'ปิดรับการจองแล้ว'
+                    : selectedZone === 'individual'
+                      ? 'กรอกข้อมูลผู้จอง'
+                      : 'เลือกโต๊ะและดูผังที่นั่ง'}
+                </span>
+                {!salesClosed && (
+                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                )}
               </button>
             </div>
           </div>

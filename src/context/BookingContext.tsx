@@ -49,6 +49,10 @@ interface BookingContextType {
   remoteLocks: Record<string, RemoteStatus>;
   // Per-zone availability for the registration badge (zone -> counts).
   zoneAvailability: Record<string, { total: number; available: number }>;
+  // Public sales cutoff, server-owned. `open` is authoritative for the UI only —
+  // acquireLock and slips.verify enforce it. undefined while the query loads.
+  salesOpen: boolean | undefined;
+  salesClosesAt: string | null;
   // False until the first tables.list resolves; gates the seat map's first paint.
   locksReady: boolean;
   // Set when selectWholeTable loses the race for a table; null once cleared.
@@ -158,6 +162,9 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const listQuery = trpc.tables.list.useQuery(undefined, { refetchOnWindowFocus: false });
   const zoneQuery = trpc.tables.zoneAvailability.useQuery(undefined, { refetchOnWindowFocus: false });
+  // Polled: a tab left open across the cutoff must notice the sale closed
+  // without a reload.
+  const salesQuery = trpc.tables.salesStatus.useQuery(undefined, { refetchInterval: 60_000 });
 
   const acquireLock = trpc.tables.acquireLock.useMutation();
   const promoteToPayment = trpc.tables.promoteToPayment.useMutation();
@@ -270,6 +277,12 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // flow working. A real { ok:false } means another session holds it → block.
       const res = await acquireLock.mutateAsync({ tableId: table.id }).catch(() => null);
       if (res && !res.ok) {
+        // 'closed' is the sales cutoff, not a lost race — marking the table
+        // 'selecting' or blaming another buyer would both be lies.
+        if (res.reason === 'closed') {
+          setLockError('ปิดรับการจองแล้ว ไม่สามารถจองโต๊ะเพิ่มได้');
+          return false;
+        }
         setLockError('โต๊ะนี้ถูกผู้อื่นเลือกอยู่ กรุณาเลือกโต๊ะอื่น');
         setRemoteLocks((prev) => ({ ...prev, [table.id]: 'selecting' }));
         return false;
@@ -840,6 +853,8 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       releaseSelection,
       remoteLocks,
       zoneAvailability: zoneQuery.data ?? {},
+      salesOpen: salesQuery.data?.open,
+      salesClosesAt: salesQuery.data?.closesAt ?? null,
       locksReady,
       lockError,
       activeLockBooking,
@@ -872,6 +887,7 @@ export const BookingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       selectedSeats,
       remoteLocks,
       zoneQuery.data,
+      salesQuery.data,
       locksReady,
       lockError,
       activeLockBooking,

@@ -44,6 +44,16 @@ if ! grep -q '^ADMIN_TOKEN=' .env; then
   exit 1
 fi
 
+# BOOKING_CLOSES_AT is ${BOOKING_CLOSES_AT:-} in compose — unset is a VALID state
+# meaning "booking never closes", so this warns rather than aborts. It exists
+# because that is the one setting whose absence is invisible: the deploy
+# succeeds, the site looks right, and nothing closes on the deadline.
+if ! grep -q '^BOOKING_CLOSES_AT=' .env; then
+  echo "WARNING: BOOKING_CLOSES_AT not in .env — public booking will NEVER close." >&2
+  echo "         Set it (e.g. 2026-09-01T00:00:00+07:00, offset required) if that" >&2
+  echo "         is not what you want, then re-run." >&2
+fi
+
 echo "==> 1/6  pulling"
 git pull --ff-only
 
